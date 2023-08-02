@@ -13,7 +13,7 @@ ZMQInclude= -I $(Dependencies)/zeromq-4.0.7/include/
 BoostLib= -L $(Dependencies)/boost_1_66_0/install/lib -lboost_date_time -lboost_serialization -lboost_iostreams
 BoostInclude= -I $(Dependencies)/boost_1_66_0/install/include
 
-DataModelInclude = -I $(Dependencies)
+DataModelInclude = -I submodules
 DataModelLib = 
 
 MyToolsInclude =
@@ -69,9 +69,9 @@ lib/libMyTools.so: UserTools/*/* UserTools/* include/Tool.h  lib/libLogging.so l
 	@echo -e "\e[38;5;226m\n*************** Making " $@ "****************\e[0m"
 	g++ $(CXXFLAGS) -shared UserTools/*/*.o -I include -L lib -lStore -lDataModel -lLogging -lDAQLogging -o lib/libMyTools.so $(MyToolsInclude) $(DataModelInclude) $(MyToolsLib) $(DataModelLib) $(ZMQLib) $(ZMQInclude) $(BoostLib) $(BoostInclude)
 
-lib/libcaen++.so: $(Dependencies)/caen++/*
-	$(MAKE) -C $(Dependencies)/caen++
-	cp $(Dependencies)/caen++/libcaen++.so $@
+lib/libcaen++.so: submodules/caen++/*
+	$(MAKE) -C submodules/caen++
+	cp submodules/caen++/libcaen++.so $@
 
 RemoteControl: $(Dependencies)/ToolDAQFramework/src/RemoteControl/* lib/libServiceDiscovery.so lib/libStore.so
 	cd $(Dependencies)/ToolDAQFramework/ && $(MAKE) RemoteControl

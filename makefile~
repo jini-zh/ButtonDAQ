@@ -2,11 +2,11 @@
 
 Dependencies = Dependencies
 
-DataModelInclude = -isystem $(Dependencies)
+DataModelInclude =
 DataModelLib	 =
 
-MyToolsInclude =
-MyToolsLib     =
+MyToolsInclude = -I $(Dependencies)/caen/include -I submodules
+MyToolsLib     = -L $(Dependencies)/caen/lib
 
 ZMQLib     = -L $(Dependencies)/zeromq-4.0.7/lib -lzmq
 ZMQInclude = -isystem $(Dependencies)/zeromq-4.0.7/include
@@ -107,9 +107,9 @@ $(eval $(call defDAQProgram,NodeDaemon))
 $(call defheaders,$(Dependencies)/ToolFrameworkCore/src/Tool/Tool.h)
 $(call defheaders,DataModel/*.h UserTools/*.h UserTools/*/*.h)
 
-lib/libcaen++.so: $(Dependencies)/caen++/*
-	$(MAKE) -C $(Dependencies)/caen++
-	cp $(Dependencies)/caen++/libcaen++.so $@
+lib/libcaen++.so: submodules/caen++/*
+	$(MAKE) -C submodules/caen++
+	cp submodules/caen++/libcaen++.so $@
 
 %.o: %.cpp
 	$(CXX) -o $@ $(CXXFLAGS) -c $< $(Include)
@@ -136,7 +136,7 @@ clean:
 
 distclean: clean
 	$(MAKE) -C $(Dependencies)/ToolDAQFramework clean
-	$(MAKE) -C $(Dependencies)/caen++ clean
+	$(MAKE) -C submodules/caen++ clean
 
 update:
 	cd $(Dependencies)/ToolFrameworkCore; git pull
