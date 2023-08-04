@@ -5,3 +5,4 @@
 #include "CalibTrigger.h"
 #include "DataWriter.h"
 #include "Digitizer.h"
+#include "HVoltage.h"
