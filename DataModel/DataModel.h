@@ -53,11 +53,8 @@ class DataModel {
   SlowControlCollection SC_vars; ///< calss for defining and handelling slow control variables
 
 
-  std::queue<std::vector<CAEN> > 
-
   std::queue<TimeSlice*> pre_sort_queue;
   std::map<trigger_type, std::queue<TimeSlice*> > trigger_queues;
-  std::queue<TimeSlice*> read_out_queue;
 
   //  bool (*Log)(std::string, int);
 
@@ -72,6 +69,9 @@ class DataModel {
   // Readout of the digitizer data in the CAEN data format
   std::queue<std::unique_ptr<std::vector<CAENEvent>>> raw_readout_queue;
   std::mutex raw_readout_mutex;
+
+  // Readout reformatted in terms of timeslices and hits
+  std::queue<std::unique_ptr<TimeSlice>> readout_queue;
 
 private:
 
