@@ -67,11 +67,12 @@ class DataModel {
   PSQLInterface SQL;
 
   // Readout of the digitizer data in the CAEN data format
-  std::queue<std::unique_ptr<std::vector<CAENEvent>>> raw_readout_queue;
+  std::unique_ptr<std::list<std::unique_ptr<std::vector<Hit>>>> raw_readout;
   std::mutex raw_readout_mutex;
 
   // Readout reformatted in terms of timeslices and hits
-  std::queue<std::unique_ptr<TimeSlice>> readout_queue;
+  std::queue<std::unique_ptr<TimeSlice>> readout;
+  std::mutex readout_mutex;
 
 private:
 
