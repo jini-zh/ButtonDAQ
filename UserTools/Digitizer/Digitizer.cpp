@@ -5,32 +5,33 @@
 void Digitizer::connect() {
   std::stringstream ss;
   std::string string;
+  std::string link_string;
   std::unordered_map<int, ThreadArgs*> thread_partition;
   for (int i = 0; ; ++i) {
     ss.str({});
     ss << "digitizer_" << i << "_link";
-    if (!m_variables.Get(ss.str(), string)) break;
+    if (!m_variables.Get(ss.str(), link_string)) break;
 
     CAEN_DGTZ_ConnectionType link;
-    if (string == "usb")
+    if (link_string == "usb")
       link = CAEN_DGTZ_USB;
-    else if (string == "optical")
+    else if (link_string == "optical")
       link = CAEN_DGTZ_OpticalLink;
-    else if (string == "usb_a4818_v2718")
+    else if (link_string == "usb_a4818_v2718")
       link = CAEN_DGTZ_USB_A4818_V2718;
-    else if (string == "usb_a4818_v3718")
+    else if (link_string == "usb_a4818_v3718")
       link = CAEN_DGTZ_USB_A4818_V3718;
-    else if (string == "usb_a4818_v4718")
+    else if (link_string == "usb_a4818_v4718")
       link = CAEN_DGTZ_USB_A4818_V4718;
-    else if (string == "usb_a4818")
+    else if (link_string == "usb_a4818")
       link = CAEN_DGTZ_USB_A4818;
-    else if (string == "usb_v4718")
+    else if (link_string == "usb_v4718")
       link = CAEN_DGTZ_USB_V4718;
 // currently not supported
 //    else if (string == "eth_v4718")
 //      link = CAEN_DGTZ_ETH_V4718;
     else {
-      ss << ": unknown link type: " << string;
+      ss << ": unknown link type: " << link_string;
       throw std::runtime_error(ss.str());
     };
 
@@ -56,11 +57,21 @@ void Digitizer::connect() {
       ss >> std::hex >> vme;
     };
 
-    info() << "connecting to digitizer " << i << "... ";
+    info()
+      << "connecting to digitizer " << i
+      << " (link = " << link_string
+      << ", arg = " << arg
+      << ", conet = " << conet
+      << ", vme = " << vme
+      << ")..."
+      << std::flush;
     digitizers.emplace_back(
         Board {
           static_cast<uint8_t>(i),
-          caen::Digitizer(link, arg, conet, vme)
+          caen::Digitizer(link, arg, conet, vme),
+          caen::Digitizer::ReadoutBuffer(),
+          caen::Digitizer::DPPEvents<CAEN_DGTZ_DPP_PSD_Event_t>(),
+          caen::Digitizer::DPPWaveforms<CAEN_DGTZ_DPP_PSD_Waveforms_t>()
         }
     );
     info() << "success" << std::endl;
@@ -74,7 +85,7 @@ void Digitizer::connect() {
 
     if (m_verbose > 2) {
       auto& i = digitizers.back().digitizer.info();
-      info()
+      log(3)
         << "model name: " << i.ModelName << '\n'
         << "model: " << i.Model << '\n'
         << "number of channels: " << i.Channels << '\n'
@@ -90,14 +101,18 @@ void Digitizer::configure() {
   CAEN_DGTZ_DPP_PSD_Params_t params;
   params.trgho    = 0;
   params.thr[0]   = 20;
-  params.selft[0] = 0;
+  params.selft[0] = 1;
   params.csens[0] = 0;
   params.sgate[0] = 50;
   params.lgate[0] = 80;
-  params.pgate[0] = 0;
+
+  // should be in agreement with CFD delay (cfdd), see the note after fig. 2.5
+  // in UM2580_DPSD_UserManual_rev9
+  params.pgate[0] = 4;
+
   params.tvaw[0]  = 0;
   params.nsbl[0]  = 1;
-  params.discr[0] = 0;
+  params.discr[0] = 1;
   params.cfdf[0]  = 0;
   params.cfdd[0]  = 4;
   params.trgc[0]  = CAEN_DGTZ_DPP_TriggerConfig_Threshold;
@@ -118,7 +133,7 @@ void Digitizer::configure() {
 
   for (int i = 1; i < MAX_DPP_PSD_CHANNEL_SIZE; ++i) {
     params.thr[i]   = params.thr[0];
-    params.selft[i]  = params.selft[0];
+    params.selft[i] = params.selft[0];
     params.sgate[i] = params.sgate[0];
     params.lgate[i] = params.lgate[0];
     params.pgate[i] = params.pgate[0];
@@ -148,7 +163,7 @@ void Digitizer::configure() {
   std::string string;
   int i = 0;
   for (auto& board : digitizers) {
-    info() << "configuring digitizer " << i << "... ";
+    info() << "configuring digitizer " << i << "... " << std::flush;
 
     auto& digitizer = board.digitizer;
 
@@ -158,7 +173,9 @@ void Digitizer::configure() {
     if (m_variables.Get(ss.str(), string)) {
       ss.str({});
       ss << string;
-      ss >> std::hex >> channels;
+      int mask;
+      ss >> std::hex >> mask;
+      channels = mask;
     };
 
     digitizer.reset();
@@ -184,11 +201,16 @@ void Digitizer::configure() {
     digitizer.setDPPEventAggregation();
 
     digitizer.setDPPParameters(channels, params);
-    
+
+    // enable the extras word with extended and fine timestamps
+    digitizer.writeRegister(0x8000, 1, 17, 17);
+
     for (uint32_t channel = 0; channel < 16; ++channel)
       if (channels & 1 << channel) {
         digitizer.setDPPPreTriggerSize(channel, pre_trigger_size);
 
+        // enable constant fraction discriminator (CFD)
+//        digitizer.writeRegister(0x1080 | channel << 8, 1, 6, 6);
         // enable fine timestamp
         digitizer.writeRegister(0x1084 | channel << 8, 2, 8, 10);
       };
@@ -289,22 +311,30 @@ bool Digitizer::Initialise(std::string configfile, DataModel &data) {
 }
 
 bool Digitizer::Execute() {
-  static bool acquire = false;
-  if (!acquire) {
-    acquire = true;
-    for (auto& board : digitizers) board.digitizer.SWStartAcquisition();
+  if (!acquiring) {
+    acquiring = true;
+    for (auto& board : digitizers) {
+      info()
+        << "starting acquisition on digitizer "
+        << static_cast<int>(board.id)
+        << std::endl;
+      board.digitizer.SWStartAcquisition();
+    };
   };
 
-  sleep(1);
-  std::lock_guard<std::mutex>(m_data->raw_readout_mutex);
-  while (!m_data->raw_readout_queue.empty()) m_data->raw_readout_queue.pop();
   return true;
 }
 
 bool Digitizer::Finalise() {
   for (auto& thread : threads) util.KillThread(&thread);
   threads.clear();
-  for (auto& board : digitizers) board.digitizer.SWStopAcquisition();
+  for (auto& board : digitizers) {
+    info()
+      << "stopping acquisition on digitizer "
+      << static_cast<int>(board.id)
+      << std::endl;
+    board.digitizer.SWStopAcquisition();
+  };
   digitizers.clear(); // disconnect from the digitizers
   return true;
 }

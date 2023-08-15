@@ -38,6 +38,8 @@ class Digitizer: public Tool {
     std::vector<Board> digitizers;
     uint16_t nsamples; // number of samples in waveforms
 
+    bool acquiring = false;
+
     void connect();
     void configure();
     void run_threads();
