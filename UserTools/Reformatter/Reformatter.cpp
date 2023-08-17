@@ -10,14 +10,14 @@ static uint64_t time_from_seconds(long double seconds) {
   seconds *= 1024;
   return time << 10
        | static_cast<uint64_t>(seconds) & 0x3ff; // Tfine
-};
+}
 
 static long double time_to_seconds(uint64_t time) {
   return (
         static_cast<long double>(time >> 10)
       + static_cast<long double>(time & 0x3ff) / 1024.0L
   ) * 2e-9L;
-};
+}
 
 inline static uint64_t decode_time(uint64_t time) {
   uint32_t tag    = time >> 32;
@@ -28,29 +28,33 @@ inline static uint64_t decode_time(uint64_t time) {
   result <<= 10;
   result |= extras & 0x3ff; // bits 0 to 9
   return result;
-};
+}
 
 inline static uint16_t decode_baseline(uint16_t baseline) {
   return (uint16_t)-baseline / 4;
-};
+}
 
 void Reformatter::ThreadArgs::send(const std::vector<Hit>& hits) {
   std::unique_ptr<TimeSlice> timeslice(new TimeSlice);
   timeslice->hits = hits;
   std::lock_guard<std::mutex> lock(tool.m_data->readout_mutex);
   tool.m_data->readout.push(std::move(timeslice));
-};
+}
 
 void Reformatter::ThreadArgs::execute() {
   if (!tool.m_data->raw_readout) return;
 
-  /* We wait until the following condition is true for each channel: the time
-   * of the earliest hit available for processing across all channels (`time`)
-   * plus the desired timeslice length (`interval`) is less than the time of
-   * the latest hit in the channel.  After that the hits are extracted from
-   * `readouts` and separated into `current` and `next` with `current` storing
-   * hits fitting the time window, and `next` storing the hits to be processed
-   * later. */
+  /* We wait until the time of the earlist hit available for processing across
+   * all channels (`time_min`) plus the desired timeslice length (`interval`)
+   * is less than the time of the latest hit in the channel for all active
+   * channels. A channel is active if we have seen data from it and its
+   * digitizer is active (see DataModel::active_digitizers and the Digitizer
+   * tool; basically a digitizer is active if it is responding). When we have
+   * all the hits we need, they are extracted from `readouts` and separated
+   * into `current` and `next` with `current` storing the hits fitting the time
+   * window, and `next` storing the hits to be send next. `current` data is
+   * then sent for processing.
+   */
 
   {
     std::lock_guard<std::mutex> lock(tool.m_data->raw_readout_mutex);
@@ -59,10 +63,19 @@ void Reformatter::ThreadArgs::execute() {
 
   for (auto& board : *readouts.back())
     for (auto& hit : *board) {
+      // Decode CAEN data format
       hit.time     = decode_time(hit.time);
       hit.baseline = decode_baseline(hit.baseline);
 
-      if (hit.channel >= channels.size()) channels.resize(hit.channel + 1);
+      if (hit.channel >= channels.size()) {
+        // A new channel is seen. Initialize the `digitizer_active` fields
+        auto i = channels.size();
+        channels.resize(hit.channel + 1);
+        for (; i < channels.size(); ++i)
+          channels[i].digitizer_active
+            = &tool.m_data->active_digitizers[Hit::get_digitizer_id(i)];
+      };
+
       Channel& channel = channels[hit.channel];
       if (channel.active) {
         if (hit.time < channel.min)
@@ -85,46 +98,19 @@ void Reformatter::ThreadArgs::execute() {
 
   // check the time window
   uint64_t end = time_min + tool.interval;
-  uint64_t deadline = time_max > tool.dead_time ? time_max - tool.dead_time : 0;
-
-  *tool.m_log << MsgL(2, 2) << time_to_seconds(deadline);
-  for (size_t i = 0; i < channels.size(); ++i)
-    *tool.m_log
-      << ' '
-      << i
-      << ' '
-      << channels[i].active
-      << ' '
-      << time_to_seconds(channels[i].max);
-  *tool.m_log << std::endl;
-
   for (auto& channel : channels)
-    if (channel.max < end && channel.max > deadline)
-      // some channel may have more data in the future
-      return;
+    if (channel.active && channel.max < end)
+      if (*channel.digitizer_active)
+        // some channel may yet provide data fitting the current time window
+        return;
+      else
+        // channel's digitizer went inactive
+        channel.active = false;
 
-  for (auto& channel : channels)
-    if (channel.max < deadline)
-      channel.active = false;
-    else
-      channel.min = channel.max;
+  // No more hits to expect. Form the timeslice and send it down the toolchain
 
-  if (next_max < end)
-    // all of the events from the previous iteration fit the time window
-    std::swap(current, next);
-  else {
-    auto inext = next->begin();
-    for (auto& hit : *next)
-      if (hit.time < end)
-        current->push_back(std::move(hit));
-      else {
-        *inext++ = std::move(hit);
-        channels[hit.channel].min = std::min(
-            channels[hit.channel].min, hit.time
-        );
-      };
-    next->resize(inext - next->begin());
-  };
+  // Reset the channels min times; they will be recalculated in a moment
+  for (auto& channel : channels) channel.min = channel.max;
 
   // Prepare the timeslice hits. Store events hitting the time window in
   // current, the rest in next.
@@ -144,50 +130,22 @@ void Reformatter::ThreadArgs::execute() {
   // Copy the hits and send the timeslice
   send(*current);
   current->clear();
+  std::swap(current, next);
 
   time_min = std::numeric_limits<uint64_t>().max();
   for (auto& channel : channels)
-    if (channel.active) {
+    if (channel.active)
       time_min = std::min(time_min, channel.min);
-      next_max = std::max(next_max, channel.max);
-    };
-
-  return;
-};
+}
 
 Reformatter::ThreadArgs::~ThreadArgs() {
   // Send the last hits for processing
   if (!next->empty()) send(*next);
-};
+}
 
 void Reformatter::Thread(Thread_args* args) {
   static_cast<ThreadArgs*>(args)->execute();
-
-  auto a = static_cast<ThreadArgs*>(args);
-  DataModel* data = a->tool.m_data;
-  while (!data->readout.empty()) {
-    std::unique_ptr<TimeSlice> timeslice;
-    {
-      std::lock_guard<std::mutex> lock(data->readout_mutex);
-      timeslice = std::move(data->readout.front());
-      data->readout.pop();
-    };
-
-    *a->tool.m_log
-      << MsgL(2, 2)
-      << timeslice->hits.size()
-      << '\t'
-      << timeslice->hits.front().time
-      << " ("
-      << time_to_seconds(timeslice->hits.front().time)
-      << ")\t"
-      << timeslice->hits.back().time
-      << " ("
-      << time_to_seconds(timeslice->hits.back().time)
-      << ')'
-      << std::endl;
-  };
-};
+}
 
 bool Reformatter::Initialise(std::string configfile, DataModel& data) {
   if (configfile != "") m_variables.Initialise(configfile);
@@ -202,10 +160,6 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
   m_variables.Get("interval", time);
   interval = time_from_seconds(time);
 
-  time = 1;
-  m_variables.Get("dead_time", time);
-  dead_time = time_from_seconds(time);
-
   thread = new ThreadArgs(*this);
   util.CreateThread("Reformatter", &Thread, thread);
 
@@ -213,9 +167,8 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
 }
 
 bool Reformatter::Execute() {
-  sleep(1);
   return true;
-};
+}
 
 bool Reformatter::Finalise() {
   util.KillThread(thread);

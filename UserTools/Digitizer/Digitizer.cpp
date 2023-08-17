@@ -76,6 +76,8 @@ void Digitizer::connect() {
     );
     info() << "success" << std::endl;
 
+    m_data->active_digitizers.push_back(0);
+
     auto thread = thread_partition.find(arg);
     if (thread == thread_partition.end()) {
       threads.emplace_back(*this);
@@ -280,10 +282,19 @@ void Digitizer::readout(Board& board) {
 
 void Digitizer::thread(Thread_args* arg) {
   ThreadArgs* args = static_cast<ThreadArgs*>(arg);
+  Digitizer& tool = args->tool;
+  DataModel& data = *tool.m_data;
   try {
-    for (auto digitizer : args->digitizers) args->tool.readout(*digitizer);
+    for (auto digitizer : args->digitizers)
+      if (data.active_digitizers[digitizer->id])
+        try {
+          tool.readout(*digitizer);
+        } catch (caen::Digitizer::Error&) {
+          data.active_digitizers[digitizer->id] = 0;
+          throw;
+        };
   } catch (std::exception& e) {
-    args->tool.error() << e.what() << std::endl;
+    tool.error() << e.what() << std::endl;
   };
 }
 
@@ -317,6 +328,7 @@ bool Digitizer::Execute() {
         << static_cast<int>(board.id)
         << std::endl;
       board.digitizer.SWStartAcquisition();
+      m_data->active_digitizers[board.id] = 1;
     };
   };
 
@@ -332,7 +344,9 @@ bool Digitizer::Finalise() {
       << static_cast<int>(board.id)
       << std::endl;
     board.digitizer.SWStopAcquisition();
+    m_data->active_digitizers[board.id] = 0;
   };
   digitizers.clear(); // disconnect from the digitizers
+
   return true;
 }

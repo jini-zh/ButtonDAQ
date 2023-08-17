@@ -17,7 +17,7 @@ DataModelInclude = -I submodules
 DataModelLib = 
 
 MyToolsInclude =
-MyToolsLib = 
+MyToolsLib = -lcaen++
 
 debug: all
 

@@ -66,6 +66,12 @@ class DataModel {
   */
   PSQLInterface SQL;
 
+  // True if the corresponding digitizer is active (no communication error
+  // experienced). The stored values are actually booleans, but we cannot use
+  // std::vector<bool> here because we need to be able to take addresses of its
+  // elements.
+  std::vector<uint8_t> active_digitizers;
+
   // Readout of the digitizer data in the CAEN data format
   std::unique_ptr<std::list<std::unique_ptr<std::vector<Hit>>>> raw_readout;
   std::mutex raw_readout_mutex;
