@@ -4,7 +4,7 @@
 #include <string>
 #include <iostream>
 
-#include "caen++/v6533.hpp"
+#include "caen++/v6534.hpp"
 
 #include "Tool.h"
 
@@ -19,7 +19,7 @@ class HVoltage: public Tool {
     void connect();
     void configure();
  private:
-    std::vector<caen::V6533> boards;
+    std::vector<caen::V6534> boards;
 
     Logging& log(int level) { return *m_log << MsgL(level, m_verbose); };
 

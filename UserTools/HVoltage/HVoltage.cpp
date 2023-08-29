@@ -1,7 +1,5 @@
 #include "HVoltage.h"
 
-#include "caen++/v6533.hpp"
-
 HVoltage::HVoltage(): Tool() {}
 
 void HVoltage::connect() {
@@ -21,8 +19,8 @@ void HVoltage::connect() {
     ss << "hv_" << i << "_usb";
     m_variables.Get(ss.str(), usb);
 
-    info() << "connecting to high voltage board V6533 " << i << "... ";
-    boards.emplace_back(caen::V6533(vme << 16, usb));
+    info() << "connecting to high voltage board V6534 " << i << "... ";
+    boards.emplace_back(caen::V6534(vme, usb));
     info() << "success" << std::endl;
 
     if (m_verbose >= 3) {
