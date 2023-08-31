@@ -1,6 +1,7 @@
 #ifndef Digitizer_H
 #define Digitizer_H
 
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -25,15 +26,23 @@ class Digitizer: public Tool {
       caen::Digitizer::DPPWaveforms<CAEN_DGTZ_DPP_PSD_Waveforms_t> waveforms;
     };
 
-    struct ThreadArgs : Thread_args {
+    struct ReadoutThread : Thread_args {
       Digitizer& tool;
       std::vector<Board*> digitizers;
 
-      ThreadArgs(Digitizer& tool): tool(tool) {};
+      ReadoutThread(Digitizer& tool): tool(tool) {};
+    };
+
+    struct MonitorThread : Thread_args {
+      Digitizer& tool;
+      std::chrono::seconds interval;
+
+      MonitorThread(Digitizer& tool): tool(tool) {};
     };
 
     Utilities util;
-    std::vector<ThreadArgs> threads;
+    std::vector<ReadoutThread> threads;
+    MonitorThread* monitor = nullptr;
 
     std::vector<Board> digitizers;
     uint16_t nsamples; // number of samples in waveforms
@@ -42,10 +51,12 @@ class Digitizer: public Tool {
 
     void connect();
     void configure();
-    void run_threads();
+    void run_readout();
+    void run_monitor();
     void readout(Board&);
 
-    static void thread(Thread_args* arg);
+    static void readout_thread(Thread_args*);
+    static void monitor_thread(Thread_args*);
 
     Logging& log(int level) { return *m_log << MsgL(level, m_verbose); };
 

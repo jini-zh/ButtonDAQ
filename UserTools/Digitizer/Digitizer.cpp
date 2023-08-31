@@ -6,7 +6,7 @@ void Digitizer::connect() {
   std::stringstream ss;
   std::string string;
   std::string link_string;
-  std::unordered_map<int, ThreadArgs*> thread_partition;
+  std::unordered_map<int, ReadoutThread*> thread_partition;
   for (int i = 0; ; ++i) {
     ss.str({});
     ss << "digitizer_" << i << "_link";
@@ -225,13 +225,21 @@ void Digitizer::configure() {
   };
 }
 
-void Digitizer::run_threads() {
+void Digitizer::run_readout() {
   std::stringstream ss;
   for (size_t i = 0; i < threads.size(); ++i) {
     ss.str({});
     ss << "Digitizer " << i;
-    util.CreateThread(ss.str(), &thread, &threads[i]);
+    util.CreateThread(ss.str(), &readout_thread, &threads[i]);
   };
+}
+
+void Digitizer::run_monitor() {
+  int interval = 5;
+  m_variables.Get("digitizer_interval", interval);
+  MonitorThread* monitor = new MonitorThread(*this);
+  monitor->interval = std::chrono::seconds(interval);
+  util.CreateThread("Digitizer monitor", &monitor_thread, monitor);
 }
 
 // Read data from the board and put it into m_data.raw_readout
@@ -280,8 +288,8 @@ void Digitizer::readout(Board& board) {
   m_data->raw_readout->push_back(std::move(hits));
 }
 
-void Digitizer::thread(Thread_args* arg) {
-  ThreadArgs* args = static_cast<ThreadArgs*>(arg);
+void Digitizer::readout_thread(Thread_args* arg) {
+  ReadoutThread* args = static_cast<ReadoutThread*>(arg);
   Digitizer& tool = args->tool;
   DataModel& data = *tool.m_data;
   try {
@@ -298,6 +306,27 @@ void Digitizer::thread(Thread_args* arg) {
   };
 }
 
+void Digitizer::monitor_thread(Thread_args* arg) {
+  auto monitor = static_cast<MonitorThread*>(arg);
+
+  Store data;
+  int b = 0;
+  for (auto& board : monitor->tool.digitizers) {
+    auto bprefix = "digitizer_" + std::to_string(b++);
+    for (unsigned c = 0; c < 16; ++c)
+      data.Set(
+          bprefix + "_channel_" + std::to_string(c) + "_temperature",
+          board.digitizer.readTemperature(c)
+      );
+  };
+
+  std::string json;
+  data >> json;
+  monitor->tool.m_data->SQL.SendMonitoringData(std::move(json), "Digitizer");
+
+  std::this_thread::sleep_for(monitor->interval);
+};
+
 bool Digitizer::Initialise(std::string configfile, DataModel &data) {
   try {
     if (configfile != "") m_variables.Initialise(configfile);
@@ -310,7 +339,8 @@ bool Digitizer::Initialise(std::string configfile, DataModel &data) {
 
     connect();
     configure();
-    run_threads();
+    run_readout();
+    run_monitor();
     return true;
 
   } catch (std::exception& e) {
@@ -336,8 +366,15 @@ bool Digitizer::Execute() {
 }
 
 bool Digitizer::Finalise() {
+  if (monitor) {
+    util.KillThread(monitor);
+    delete monitor;
+    monitor = nullptr;
+  };
+
   for (auto& thread : threads) util.KillThread(&thread);
   threads.clear();
+
   for (auto& board : digitizers) {
     info()
       << "stopping acquisition on digitizer "
