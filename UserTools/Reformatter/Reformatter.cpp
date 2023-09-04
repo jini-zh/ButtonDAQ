@@ -148,6 +148,10 @@ void Reformatter::Thread(Thread_args* args) {
 }
 
 bool Reformatter::Initialise(std::string configfile, DataModel& data) {
+  std::string json;
+  if (data.SQL.GetConfig(json, 0, "Digitizer"))
+    m_variables.JsonParser(std::move(json));
+
   if (configfile != "") m_variables.Initialise(configfile);
   //m_variables.Print();
 
