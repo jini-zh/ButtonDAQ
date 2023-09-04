@@ -132,7 +132,7 @@ bool PSQLInterface::GetConfig(std::string& json_data, int version, std::string d
 
   int timeout=300;
   std::string err="";
-  std::string query= "select data from configurations";// where name='"+ device + "' and version=" + std::to_string(version) +");";
+  std::string query= "select data from configurations where name='"+ device + "' and version=" + std::to_string(version) +";";
   
 if(!SQLQuery(m_dbname, query, json_data, timeout, err)){
     std::cerr<<"GetConfig error: "<<err<<std::endl;
