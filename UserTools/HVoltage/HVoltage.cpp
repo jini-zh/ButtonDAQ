@@ -32,7 +32,15 @@ void HVoltage::connect() {
     ss << "hv_" << i << "_usb";
     m_variables.Get(ss.str(), usb);
 
-    info() << "connecting to high voltage board V6534 " << i << "... ";
+    info()
+      << "connecting to high voltage board V6534 "
+      << i
+      << " (vme = "
+      << std::hex << vme << std::dec
+      << ", usb = "
+      << usb
+      << ")..."
+      << std::flush;
     boards.emplace_back(caen::V6534(vme, usb));
     info() << "success" << std::endl;
 
@@ -119,6 +127,10 @@ void HVoltage::monitor_thread(Thread_args* args) {
 };
 
 bool HVoltage::Initialise(std::string configfile, DataModel& data) {
+  std::string json;
+  if (data.SQL.GetConfig(json, 0, "HVoltage"))
+    m_variables.JsonParser(std::move(json));
+
   if (configfile != "") m_variables.Initialise(configfile);
   //m_variables.Print();
 
