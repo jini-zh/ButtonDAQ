@@ -2,9 +2,55 @@
 
 if ! command -v dialog &> /dev/null
 then
-    echo "dialog package needed for operation. Please install then re-run script"
-    exit
+    if [ $1 ]
+    then
+	if [ $1 != "ALL" ]
+	then
+	    echo "dialog package needed for operation unless activating all Tools with [ ./ToolSelect.sh ALL ]. Please install then re-run script"
+	    exit
+	else
+	    #	     echo $1 hello
+	    
+	    for Tool in `ls */*.cpp | grep -v template/ | sed s:/:' ': | awk '{print $2}' | sed s:.cpp:: | grep -v Factory`
+	    do
+		fin=0
+		for current in `cat Factory/Factory.cpp | grep -v '/' |grep if| awk '{print $4}' | sed s:';':: `
+		do
+		    if [ $Tool == $current ]
+		    then
+			fin=1
+			#			 echo "$Tool $num on "
+		    fi
+		done
+		
+		if [ $fin -eq 0 ]
+		then
+		    echo "$Tool $num off "
+		    echo "#include <$Tool.h>" >> Unity.h
+		    more Factory/Factory.cpp | sed s:"return ret":"if (tool==\"$Tool\") ret=new $Tool;\nreturn ret": >Factory/Factory.tmp
+		    mv Factory/Factory.tmp Factory/Factory.cpp
+		fi
+	    done
+	    
+	    for Tool in `ls InactiveTools/*/*.cpp | sed s:/:' ':g | awk '{print $3}' | sed s:.cpp:: `
+	    do
+		echo "$Tool $num inactive "
+		mv InactiveTools/$Tool ./
+		echo "#include <$Tool.h>" >> Unity.h
+		more Factory/Factory.cpp | sed s:"return ret":"if (tool==\"$Tool\") ret=new $Tool;\nreturn ret": >Factory/Factory.tmp      
+		mv Factory/Factory.tmp Factory/Factory.cpp
+	    done
+	     
+	    
+	    exit
+	fi
+    else
+	echo "dialog package needed for operation unless activating all Tools with [ ./ToolSelect.sh ALL ]. Please install then re-run script"
+	exit
+	
+    fi
 fi
+
 
 
 #cat Factory.cpp | grep -v '/' |grep if| awk '{print $4}' | sed s:';':: > on
