@@ -114,6 +114,7 @@ done` 2> tmptools
 	    touch Unity.h
 	    
 	    echo "#include \"Factory.h\"
+#include \"Unity.h\"
 
 Tool* Factory(std::string tool) {
 Tool* ret=0;
