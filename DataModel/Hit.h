@@ -3,27 +3,13 @@
 
 #include <cstdint>
 
-struct CAENEvent {
-  uint32_t TimeTag;
-  uint32_t Extras;
-  uint16_t ChargeShort;
-  uint16_t ChargeLong;
-  int16_t  Baseline;
-  uint8_t  channel; // (channel number) | (digitizer number) << 4
+struct Hit {
+  uint64_t time;
+  uint16_t charge_short;
+  uint16_t charge_long;
+  uint16_t baseline;
+  uint8_t  channel;
   std::vector<uint16_t> waveform;
 };
-
-
-struct Hit{
-
-  ///for you to fill out Evgenii
-  long time;
-
-
-
-
-};
-
-
 
 #endif

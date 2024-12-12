@@ -46,11 +46,14 @@ class DataModel : public DAQDataModelBase {
   
   std::queue<TimeSlice*> pre_sort_queue;
   std::map<trigger_type, std::queue<TimeSlice*> > trigger_queues;
-  std::queue<TimeSlice*> read_out_queue;
 
   // Readout of the digitizer data in the CAEN data format
-  std::queue<std::unique_ptr<std::vector<CAENEvent>>> raw_readout_queue;
+  std::unique_ptr<std::list<std::unique_ptr<std::vector<Hit>>>> raw_readout;
   std::mutex raw_readout_mutex;
+
+  // Readout reformatted in terms of timeslices and hits
+  std::queue<std::unique_ptr<TimeSlice>> readout;
+  std::mutex readout_mutex;
 
 private:
 

@@ -234,7 +234,7 @@ void Digitizer::run_threads() {
   };
 }
 
-// Read data from the board and put it into m_data.raw_readout_queue
+// Read data from the board and put it into m_data.raw_readout
 void Digitizer::readout(Board& board) {
   board.digitizer.readData(CAEN_DGTZ_SLAVE_TERMINATED_READOUT_MBLT, board.buffer);
   if (board.digitizer.getNumEvents(board.buffer) == 0) return;
@@ -246,9 +246,7 @@ void Digitizer::readout(Board& board) {
        ++channel)
     nhits += board.events.nevents(channel);
 
-  auto hits = std::unique_ptr<std::vector<CAENEvent>>(
-      new std::vector<CAENEvent>(nhits)
-  );
+  std::unique_ptr<std::vector<Hit>> hits(new std::vector<Hit>(nhits));
   auto hit = hits->begin();
   for (uint32_t channel = 0;
        channel < board.digitizer.info().Channels;
@@ -259,19 +257,17 @@ void Digitizer::readout(Board& board) {
          event != board.events.end(channel);
          ++event)
     {
-      hit->TimeTag     = event->TimeTag;
-      hit->Extras      = event->Extras;
-      hit->ChargeShort = event->ChargeShort;
-      hit->ChargeLong  = event->ChargeLong;
-      hit->Baseline    = event->Baseline;
-      hit->channel     = id;
+      hit->time         = static_cast<uint64_t>(event->TimeTag) << 32
+                        | event->Extras;
+      hit->charge_short = event->ChargeShort;
+      hit->charge_long  = event->ChargeLong;
+      hit->baseline     = event->Baseline;
+      hit->channel      = id;
       if (nsamples) {
         board.events.decode(event, board.waveforms);
-        auto waveform = board.waveforms.waveforms()->Trace1;
+        uint16_t* waveform = board.waveforms.waveforms()->Trace1;
         hit->waveform.insert(
-            hit->waveform.end(),
-            waveform,
-            waveform + nsamples * sizeof(*waveform)
+            hit->waveform.end(), waveform, waveform + nsamples
         );
       };
       ++hit;
@@ -279,7 +275,9 @@ void Digitizer::readout(Board& board) {
   };
 
   std::lock_guard<std::mutex> lock(m_data->raw_readout_mutex);
-  m_data->raw_readout_queue.push(std::move(hits));
+  if (!m_data->raw_readout)
+    m_data->raw_readout.reset(new std::list<std::unique_ptr<std::vector<Hit>>>());
+  m_data->raw_readout->push_back(std::move(hits));
 }
 
 void Digitizer::thread(Thread_args* arg) {
