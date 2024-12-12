@@ -14,6 +14,7 @@
 #include "DAQLogging.h"
 #include "DAQUtilities.h"
 #include "TimeSlice.h"
+#include "Hit.h"
 
 
 #include <zmq.hpp>
@@ -46,6 +47,10 @@ class DataModel : public DAQDataModelBase {
   std::queue<TimeSlice*> pre_sort_queue;
   std::map<trigger_type, std::queue<TimeSlice*> > trigger_queues;
   std::queue<TimeSlice*> read_out_queue;
+
+  // Readout of the digitizer data in the CAEN data format
+  std::queue<std::unique_ptr<std::vector<CAENEvent>>> raw_readout_queue;
+  std::mutex raw_readout_mutex;
 
 private:
 
