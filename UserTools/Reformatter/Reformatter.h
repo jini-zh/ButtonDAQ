@@ -21,7 +21,12 @@ class Reformatter: public ToolFramework::Tool {
         uint64_t min;
         uint64_t max;
 
-        // we have data from this channel in next or readout
+        // pointer to the digitizer status (see DataModel::active_digitizers)
+        uint8_t* digitizer_active;
+
+        // we have or expect to have data in this channel
+        // (we have seen events coming from this channel and the channel
+        // digitizer is not marked as inactive)
         bool active;
       };
 
@@ -47,9 +52,6 @@ class Reformatter: public ToolFramework::Tool {
       // time of the latest hit in next or readout (max(channels.max))
       uint64_t time_max = 0;
 
-      // time of the latest hit in next
-      uint64_t next_max;
-
       ThreadArgs(Reformatter& tool):
         tool(tool),
         current(new std::vector<Hit>()),
@@ -64,8 +66,6 @@ class Reformatter: public ToolFramework::Tool {
 
     // target timeslice length
     uint64_t interval;
-    // we stop waiting for channels that have had no data this time long
-    uint64_t dead_time;
 
     Utilities util;
     ThreadArgs* thread;
