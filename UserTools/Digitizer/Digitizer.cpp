@@ -270,7 +270,14 @@ void Digitizer::readout(Board& board) {
                         | event->Extras;
       hit->charge_short = event->ChargeShort;
       hit->charge_long  = event->ChargeLong;
+#if 0
       hit->baseline     = event->Baseline;
+#else
+      // Fine timestamps are incompatible with baselines.
+      // See UM4380_725-730_DPP_PSD_Registers_rev7.pdf, DPP Algorithm Control
+      // 2, description of the Extras word options (bits [10:8]) at page 30.
+      hit->baseline     = 0;
+#endif
       hit->channel      = id;
       if (nsamples) {
         board.events.decode(event, board.waveforms);
