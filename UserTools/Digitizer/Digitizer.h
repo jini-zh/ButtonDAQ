@@ -1,6 +1,7 @@
 #ifndef Digitizer_H
 #define Digitizer_H
 
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -25,27 +26,38 @@ class Digitizer: public ToolFramework::Tool {
       caen::Digitizer::DPPWaveforms<CAEN_DGTZ_DPP_PSD_Waveforms_t> waveforms;
     };
 
-    struct ThreadArgs : ToolFramework::Thread_args {
+    struct ReadoutThread : ToolFramework::Thread_args {
       Digitizer& tool;
       std::vector<Board*> digitizers;
 
-      ThreadArgs(Digitizer& tool): tool(tool) {};
+      ReadoutThread(Digitizer& tool): tool(tool) {};
+    };
+
+    struct MonitorThread : ToolFramework::Thread_args {
+      Digitizer& tool;
+      std::chrono::seconds interval;
+
+      MonitorThread(Digitizer& tool): tool(tool) {};
     };
 
     ToolFramework::Utilities util;
-    std::vector<ThreadArgs> threads;
+    std::vector<ReadoutThread> threads;
 
     std::vector<Board> digitizers;
     uint16_t nsamples; // number of samples in waveforms
 
     bool acquiring = false;
 
+    MonitorThread* monitor = nullptr;
+
     void connect();
     void configure();
-    void run_threads();
+    void run_readout();
+    void run_monitor();
     void readout(Board&);
 
-    static void thread(ToolFramework::Thread_args* arg);
+    static void readout_thread(ToolFramework::Thread_args*);
+    static void monitor_thread(ToolFramework::Thread_args*);
 
     ToolFramework::Logging& log(int level) {
       return *m_log << ToolFramework::MsgL(level, m_verbose);
