@@ -73,47 +73,68 @@ void HVoltage::configure() {
   for (unsigned i = 0; i < boards.size(); ++i) {
     caen::V6534* board = &boards[i];
     for (int channel = 0; channel < 6; ++channel) {
-      float voltage = 0;
+      board->set_pwdown(channel, caen::V6534::PowerDownMode::ramp);
+      board->set_ramp_up(0, 5);
+      board->set_ramp_down(0, 10);
+
       ss.str({});
-      ss << "hv_" << i << "_ch_" << channel;
-      bool power = m_variables.Get(ss.str(), voltage) && voltage > 0;
-      board->set_voltage(channel, voltage);
+      ss << "hv_" << i << "_ch_" << channel << "_power";
+      std::string var = ss.str();
+      bool power = false;
+      m_variables.Get(var, power);
       board->set_power(channel, power);
 
-      auto set_voltage = [&ui, board, channel](std::string name)
-        -> std::string
-      {
-        auto value = ui.GetValue<float>(name);
-        board->set_voltage(channel, value);
-        return "ok";
-      };
+      auto element = ui_add(
+          ui, var, OPTIONS,
+          [&ui, board, channel](std::string name) -> std::string {
+            auto value = ui.GetValue<std::string>(name);
+            board->set_power(channel, value == "on");
+            return "ok";
+          }
+      );
+      element->AddOption("on");
+      element->AddOption("off");
+      element->SetValue(power ? "on" : "off");
 
       ss.str({});
-      ss << "hv_" << i << "_channel_" << channel << "_voltage";
-      auto name = ss.str();
-      auto element = ui_add(ui, name, VARIABLE, set_voltage);
+      ss << "hv_" << i << "_ch_" << channel << "_voltage";
+      var = ss.str();
+      float voltage = 0;
+      m_variables.Get(var, voltage);
+      board->set_voltage(channel, voltage);
+
+      element = ui_add(
+          ui, var, VARIABLE,
+          [&ui, board, channel](std::string name) -> std::string {
+            auto value = ui.GetValue<float>(name);
+            board->set_voltage(channel, value);
+            return "ok";
+          }
+      );
       element->SetMin(0);
       element->SetMax(boards[i].voltage_max(channel));
       element->SetStep(0.1);
       element->SetValue(voltage);
-
-      auto set_power = [&ui, board, channel](std::string name)
-        -> std::string
-      {
-        auto value = ui.GetValue<std::string>(name);
-        board->set_power(channel, value == "on");
-        return "ok";
-      };
-
-      ss.str({});
-      ss << "hv_" << i << "_channel_" << channel << "_power";
-      name = ss.str();
-      element = ui_add(ui, name, OPTIONS, set_power);
-      element->AddOption("on");
-      element->AddOption("off");
-      element->SetValue(power ? "on" : "off");
     };
   };
+
+  ui_add(
+      ui, "Shutdown_all", BUTTON,
+      [this](std::string name) -> std::string {
+        for (auto& board : boards)
+          for (int channel = 0; channel < 6; ++channel)
+            board.set_power(channel, false);
+
+        std::stringstream ss;
+        for (size_t i = 0; i < boards.size(); ++i)
+          for (int channel = 0; channel < 6; ++channel) {
+            ss.str({});
+            ss << "hv_" << i << "_ch_" << channel << "_power";
+            m_data->sc_vars[ss.str()]->SetValue("off");
+          }
+        return "ok";
+      }
+  );
 };
 
 void HVoltage::monitor_thread(Thread_args* args) {
