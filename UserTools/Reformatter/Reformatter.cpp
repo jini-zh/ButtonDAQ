@@ -32,8 +32,19 @@ inline static uint64_t decode_time(uint64_t time) {
   return result;
 }
 
+// CAENDigitizer 2.17.3 coupled with DPP-PSD firmware version 136.137 (AMC)
+// 04.25 (ROC) has a bug when the baseline (times 4) is returned as an int16_t
+// rather than uint16_t, with the sign depending on the channel pulse polarity.
+// This function decodes the proper baseline value.
 inline static uint16_t decode_baseline(uint16_t baseline) {
+  // XXX: currently assuming positive pulse polarity
+#if 1
+  // positive pulse polarity
   return (uint16_t)-baseline / 4;
+#else
+  // negative pulse polarity
+  return baseline / 4;
+#endif
 }
 
 void Reformatter::ThreadArgs::send(const std::vector<Hit>& hits) {
