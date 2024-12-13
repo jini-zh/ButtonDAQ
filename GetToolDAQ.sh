@@ -5,6 +5,7 @@ tooldaq=1
 boostflag=1
 zmq=1
 final=1
+caenpp=1
 rootflag=0
 setup=0
 threads=`nproc --all`
@@ -36,6 +37,11 @@ do
             echo "Installing ToolDAQ without zmq"
             zmq=0
             ;;
+
+        --no_caenpp )
+	    echo "Installing ToolDAQ without caen++"
+	    caenpp=0
+	    ;;
 
 	--no_tooldaq )
 	    echo "Installing dependancies without ToolDAQ"
@@ -86,6 +92,114 @@ do
     esac
     shift
 done
+
+# Installs CAEN libraries.
+# Arguments:
+#   1: path to install to. Installs libraries to $1/lib and header files to
+#      $1/include
+install_caen() {
+  (
+    echo 'Installing CAEN libraries'
+
+    declare -a libs=(CAENComm CAENVME CAENDigitizer)
+    declare -a urls=(
+      'https://www.caen.it/products/caencomm-library/'
+      'https://www.caen.it/products/caenvmelib-library/'
+      'https://www.caen.it/products/caendigitizer-library/'
+    )
+
+    declare -a archives
+    declare -i n=0
+
+    shopt -s nullglob
+
+    # Check for libraries already installed locally or to a place known to GCC
+    declare -i i
+    IFS=:
+    for dir in \
+      "$1/lib" \
+      $LD_LIBRARY_PATH \
+      `g++ -print-search-dirs | sed -n 's,^libraries: =,,; T; p'`
+    do
+      for ((i = 0; i < ${#libs[@]}; ++i)); do
+        if [[ -e "$dir/lib${libs[$i]}.so" ]]; then
+          if [[ -z ${archives[$i]} ]]; then
+            echo "Found $dir/lib${libs[$i]}.so"
+            archives[$i]=.
+            n+=1
+          fi
+        fi
+      done
+      if (($n == ${#libs[@]})); then
+        echo 'All required CAEN libraries are already installed'
+        return 0
+      fi
+    done
+    IFS=
+
+    tmp=`mktemp -dt 'caen.XXXXXX'` || return $?
+    trap 'rm -r "$tmp"' exit
+
+    # Check if the archives are already available
+    find_archives() {
+      local -i i
+      local -a a
+      for ((i = 0; i < ${#libs[@]}; ++i)); do
+        a=("$1/${libs[$i]}"*.tgz)
+        if ((${#a[@]})); then
+          if [[ -z ${archives[$i]} ]] || [[ ${archives[$i]} = . ]]; then
+            n+=1
+          fi
+          archives[$i]=`
+            for archive in "${a[@]}"; do
+              echo "$archive"
+            done | sort -Vr | head -n 1
+          `
+          echo "Found ${archives[$i]}"
+        fi
+      done
+    }
+    find_archives "$1"
+
+    # Ask the user
+    while ((n < ${#libs[@]})); do
+      echo
+      echo
+      echo 'Distribution of CAEN libraries is restricted by the license. Please download the following libraries from the CAEN web site:'
+      for ((i = 0; i < ${#libs[@]}; ++i)); do
+        if [[ -z ${archives[$i]} ]]; then
+          echo -e "${libs[$i]}\t${urls[$i]}"
+        fi
+      done
+      echo "and put them to $tmp or enter a different directory below"
+      echo 'Hit Enter to continue or Ctrl-D to skip the installation'
+      read -ep "[$tmp] " dir || return 0
+      [[ -z $dir ]] && dir=$tmp
+      find_archives "$dir"
+    done
+
+    for dir in lib include; do
+      if ! [[ -d "$1/$dir" ]]; then
+        mkdir -p "$1/$dir" || return 1
+      fi
+    done
+
+    for ((i = 0; i < ${#libs[@]}; ++i)); do
+      archive=${archives[$i]}
+      [[ $archive = . ]] && continue
+      distr=`tar -tf "$archive" | head -n 1`
+      version=${archive##*-v}
+      version=${version%.tgz}
+      if ! [[ -e "$1/${archive##*/}" ]]; then
+        cp "$archive" "$1" && chmod -x "$1/${archive##*/}"
+      fi &&
+      tar -C "$tmp" -xf "$archive" &&
+      cp -v "$tmp/$distr/lib/x64/lib${libs[$i]}.so.v$version" "$1/lib" &&
+      ln -svf "lib${libs[$i]}.so.v$version" "$1/lib/lib${libs[$i]}.so" &&
+      cp -v "$tmp/$distr/include"/* "$1/include" || return 1
+    done
+  )
+}
 
 if [ $init -eq 1 ]
 then
@@ -171,6 +285,22 @@ then
     
 fi
 
+if [ $caenpp -eq 1 ]
+then
+    [[ ! -d caen ]] && mkdir caen
+    install_caen caen
+    export LD_LIBRARY_PATH=`pwd`/caen/lib:$LD_LIBRARY_PATH
+
+    git clone --single-branch \
+              -b button \
+              https://github.com/jini-zh/caenpp.git caen/caen++
+    cd caen/caen++
+    ./configure --prefix="$PWD/.." &&
+    CPATH=../include make -j $threads &&
+    make install
+
+    cd ../..
+fi
 
 cd ../
 
