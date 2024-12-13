@@ -21,9 +21,9 @@ jobs:
     - name: test
       run : source ./Setup.sh && ./main
     
-  build_centos-latest:
+  build_centos-stream-8:
     runs-on: ubuntu-latest
-    container: 'centos:latest'
+    container: 'quay.io/centos/centos:stream8'
     steps:
     - uses: actions/checkout@v2
     - name: prerequisits
@@ -36,6 +36,18 @@ jobs:
   build_centos-7:
     runs-on: ubuntu-latest
     container: 'centos:centos7'
+    steps:
+    - uses: actions/checkout@v2
+    - name: prerequisits
+      run: yum install -y git make gcc-c++ zlib-devel dialog
+    - name: Get ToolDAQ
+      run: ./GetToolDAQ.sh
+    - name: test
+      run : source ./Setup.sh && ./main
+
+  build_Rocky-9:
+    runs-on: ubuntu-latest
+    container: 'rockylinux:9'
     steps:
     - uses: actions/checkout@v2
     - name: prerequisits
