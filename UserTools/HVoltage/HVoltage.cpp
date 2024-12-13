@@ -1,5 +1,20 @@
+#include <thread>
+
 #include "HVoltage.h"
 #include "DataModel.h"
+
+static SlowControlElement* ui_add(
+  SlowControlCollection& ui,
+  const std::string& name,
+  SlowControlElementType type,
+  const std::function<std::string (std::string)>& callback
+) {
+  if (!ui.Add(name, type, callback))
+    throw std::runtime_error(
+        "failed to add slow control element `" + name + '\''
+    );
+  return ui[name];
+};
 
 HVoltage::HVoltage(): Tool() {}
 
@@ -76,11 +91,7 @@ void HVoltage::configure() {
       ss.str({});
       ss << "hv_" << i << "_channel_" << channel << "_voltage";
       auto name = ss.str();
-      if (!ui.Add(name, VARIABLE, set_voltage))
-        throw std::runtime_error(
-            "failed to add slow control element `" + name + '\''
-        );
-      auto element = ui[name];
+      auto element = ui_add(ui, name, VARIABLE, set_voltage);
       element->SetMin(0);
       element->SetMax(boards[i].voltage_max(channel));
       element->SetStep(0.1);
@@ -97,16 +108,35 @@ void HVoltage::configure() {
       ss.str({});
       ss << "hv_" << i << "_channel_" << channel << "_power";
       name = ss.str();
-      if (!ui.Add(name, OPTIONS, set_power))
-        throw std::runtime_error(
-            "failed to add slow control element `" + name + '\''
-        );
-      element = ui[name];
+      element = ui_add(ui, name, OPTIONS, set_power);
       element->AddOption("on");
       element->AddOption("off");
       element->SetValue(power ? "on" : "off");
     };
   };
+};
+
+void HVoltage::monitor_thread(Thread_args* args) {
+  auto mon = static_cast<Monitor*>(args);
+
+  Store data;
+  int i = 0;
+  for (auto& board : mon->tool.boards) {
+    auto bprefix = "hv_" + std::to_string(i++);
+    for (uint8_t c = 0; c < board.nchannels(); ++c) {
+      auto cprefix = bprefix = "_channel_" + std::to_string(c);
+      data.Set(cprefix + "_power", board.power(c) ? "on" : "off");
+      data.Set(cprefix + "_voltage", board.voltage(c));
+      data.Set(cprefix + "_current", board.current(c));
+      data.Set(cprefix + "_temperature", board.temperature(c));
+    };
+  };
+
+  std::string json;
+  data >> json;
+  mon->tool.m_data->services->SendMonitoringData(json, "HVoltage");
+
+  std::this_thread::sleep_for(mon->interval);
 };
 
 bool HVoltage::Initialise(std::string configfile, DataModel& data) {
@@ -120,6 +150,28 @@ bool HVoltage::Initialise(std::string configfile, DataModel& data) {
   connect();
   configure();
 
+  if (data.services) {
+    monitor = new Monitor(*this);
+    int interval = 5;
+    m_variables.Get("monitor_interval", interval);
+    monitor->interval = std::chrono::seconds(interval);
+    util.CreateThread("HVoltage monitor", &monitor_thread, monitor);
+
+    auto element = ui_add(
+        m_data->sc_vars,
+        "hv_interval",
+        VARIABLE,
+        [this](std::string name) -> std::string {
+          auto& ui = m_data->sc_vars;
+          monitor->interval = std::chrono::seconds(ui.GetValue<unsigned>(name));
+          return name + ' ' + ui.GetValue<std::string>(name);
+        }
+    );
+    element->SetMin(0);
+    element->SetStep(1);
+    element->SetValue(interval);
+  };
+
   ExportConfiguration();
   return true;
 };
@@ -132,5 +184,11 @@ bool HVoltage::Finalise() {
   for (auto& board : boards)
     for (int channel = 0; channel < 6; ++channel)
       board.set_power(channel, false);
+
+  if (monitor) {
+    util.KillThread(monitor);
+    delete monitor;
+  };
+
   return true;
 };
