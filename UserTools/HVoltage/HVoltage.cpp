@@ -112,7 +112,7 @@ void HVoltage::configure() {
           }
       );
       element->SetMin(0);
-      element->SetMax(boards[i].voltage_max(channel));
+      element->SetMax(2e3);
       element->SetStep(0.1);
       element->SetValue(voltage);
     };
