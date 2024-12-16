@@ -37,8 +37,8 @@ inline static uint64_t decode_time(uint64_t time) {
 // rather than uint16_t, with the sign depending on the channel pulse polarity.
 // This function decodes the proper baseline value.
 inline static uint16_t decode_baseline(uint16_t baseline) {
-  // XXX: currently assuming positive pulse polarity
-#if 1
+  // XXX: currently assuming negative pulse polarity
+#if 0
   // positive pulse polarity
   return (uint16_t)-baseline / 4;
 #else

@@ -161,6 +161,13 @@ void Digitizer::configure() {
   bool baseline = false;
   if (waveforms) m_variables.Get("waveforms_baseline", baseline);
 
+  auto polarity = CAEN_DGTZ_PulsePolarityPositive;
+  {
+    int p;
+    if (m_variables.Get("pulse_polarity", p) && p < 0)
+      polarity = CAEN_DGTZ_PulsePolarityNegative;
+  };
+
   int pre_trigger_size = 0;
   m_variables.Get("pre_trigger_size", pre_trigger_size);
 
@@ -215,6 +222,8 @@ void Digitizer::configure() {
 //        digitizer.writeRegister(0x1080 | channel << 8, 1, 6, 6);
         // enable fine timestamp
         digitizer.writeRegister(0x1084 | channel << 8, 2, 8, 10);
+
+        digitizer.setChannelPulsePolarity(channel, polarity);
       };
 
     board.buffer.allocate(digitizer);
