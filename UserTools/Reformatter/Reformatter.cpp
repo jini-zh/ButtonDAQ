@@ -49,10 +49,13 @@ inline static uint16_t decode_baseline(uint16_t baseline) {
 
 void Reformatter::ThreadArgs::send(const std::vector<Hit>& hits) {
   std::unique_ptr<TimeSlice> timeslice(new TimeSlice);
-  timeslice->hits = hits;
+  timeslice->hits.reserve(hits.size());
+  for (auto& hit : hits) timeslice->hits.push_back(std::move(hit));
+  hits.clear();
+
   std::lock_guard<std::mutex> lock(tool.m_data->readout_mutex);
   tool.m_data->readout.push(std::move(timeslice));
-}
+};
 
 void Reformatter::ThreadArgs::execute() {
   /* We wait until the time of the earlist hit available for processing across
@@ -146,7 +149,6 @@ void Reformatter::ThreadArgs::execute() {
 
   // Copy the hits and send the timeslice
   send(*current);
-  current->clear();
   std::swap(current, next);
 
   // Reset the channels min times
