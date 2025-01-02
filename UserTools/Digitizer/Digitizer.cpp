@@ -322,18 +322,19 @@ void Digitizer::readout_thread(Thread_args* arg) {
   ReadoutThread* args = static_cast<ReadoutThread*>(arg);
   Digitizer& tool = args->tool;
   DataModel& data = *tool.m_data;
-  try {
-    for (auto digitizer : args->digitizers)
-      if (data.active_digitizers[digitizer->id])
-        try {
-          tool.readout(*digitizer);
-        } catch (caen::Digitizer::Error&) {
-          data.active_digitizers[digitizer->id] = 0;
-          throw;
-        };
-  } catch (std::exception& e) {
-    tool.error() << e.what() << std::endl;
-  };
+  for (auto digitizer : args->digitizers)
+    if (data.active_digitizers[digitizer->id])
+      try {
+        tool.readout(*digitizer);
+      } catch (caen::Digitizer::Error& error) {
+        tool.error()
+          << "digitizer "
+          << static_cast<int>(digitizer->id)
+          << ": "
+          << error.what()
+          << std::endl;
+        data.active_digitizers[digitizer->id] = 0;
+      };
 }
 
 void Digitizer::monitor_thread(Thread_args* arg) {
