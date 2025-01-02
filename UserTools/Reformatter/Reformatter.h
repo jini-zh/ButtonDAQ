@@ -47,11 +47,6 @@ class Reformatter: public ToolFramework::Tool {
 
       std::vector<Channel> channels;
 
-      // time of the earliest hit in next or readout (min(channels.min))
-      uint64_t time_min = std::numeric_limits<uint64_t>().max();
-      // time of the latest hit in next or readout (max(channels.max))
-      uint64_t time_max = 0;
-
       ThreadArgs(Reformatter& tool):
         tool(tool),
         current(new std::vector<Hit>()),

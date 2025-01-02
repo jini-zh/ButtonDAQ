@@ -55,11 +55,9 @@ void Reformatter::ThreadArgs::send(const std::vector<Hit>& hits) {
 }
 
 void Reformatter::ThreadArgs::execute() {
-  if (!tool.m_data->raw_readout) return;
-
   /* We wait until the time of the earlist hit available for processing across
-   * all channels (`time_min`) plus the desired timeslice length (`interval`)
-   * is less than the time of the latest hit in the channel for all active
+   * all channels (`start`) plus the desired timeslice length (`interval`) is
+   * less than the time of the latest hit in the channel for all active
    * channels. A channel is active if we have seen data from it and its
    * digitizer is active (see DataModel::active_digitizers and the Digitizer
    * tool; basically a digitizer is active if it is responding). When we have
@@ -69,48 +67,51 @@ void Reformatter::ThreadArgs::execute() {
    * then sent for processing.
    */
 
-  {
-    std::lock_guard<std::mutex> lock(tool.m_data->raw_readout_mutex);
-    readouts.push_back(std::move(tool.m_data->raw_readout));
+  if (tool.m_data->raw_readout) {
+    {
+      std::lock_guard<std::mutex> lock(tool.m_data->raw_readout_mutex);
+      readouts.push_back(std::move(tool.m_data->raw_readout));
+    };
+
+    for (auto& board : *readouts.back())
+      for (auto& hit : *board) {
+        // Decode CAEN data format
+        hit.time     = decode_time(hit.time);
+        hit.baseline = decode_baseline(hit.baseline);
+
+        if (hit.channel >= channels.size()) {
+          // A new channel is seen. Initialize the `digitizer_active` fields
+          auto i = channels.size();
+          channels.resize(hit.channel + 1);
+          for (; i < channels.size(); ++i)
+            channels[i].digitizer_active
+              = &tool.m_data->active_digitizers[Hit::get_digitizer_id(i)];
+        };
+
+        Channel& channel = channels[hit.channel];
+        if (channel.active) {
+          if (hit.time < channel.min)
+            channel.min = hit.time;
+          else if (hit.time > channel.max)
+            channel.max = hit.time;
+        } else {
+          channel.active = true;
+          channel.min = channel.max = hit.time;
+        };
+      };
+  } else if (current->empty()) {
+    usleep(time_to_seconds(tool.interval) * 0.5e6);
+    return;
   };
 
-  for (auto& board : *readouts.back())
-    for (auto& hit : *board) {
-      // Decode CAEN data format
-      hit.time     = decode_time(hit.time);
-      hit.baseline = decode_baseline(hit.baseline);
-
-      if (hit.channel >= channels.size()) {
-        // A new channel is seen. Initialize the `digitizer_active` fields
-        auto i = channels.size();
-        channels.resize(hit.channel + 1);
-        for (; i < channels.size(); ++i)
-          channels[i].digitizer_active
-            = &tool.m_data->active_digitizers[Hit::get_digitizer_id(i)];
-      };
-
-      Channel& channel = channels[hit.channel];
-      if (channel.active) {
-        if (hit.time < channel.min)
-          channel.min = hit.time;
-        else if (hit.time > channel.max)
-          channel.max = hit.time;
-      } else {
-        channel.active = true;
-        channel.min = channel.max = hit.time;
-      };
-    };
-
+  auto start = std::numeric_limits<uint64_t>().max();
   for (auto& channel : channels)
-    if (channel.active) {
-      if (channel.min < time_min)
-        time_min = channel.min;
-      else if (channel.max > time_max)
-        time_max = channel.max;
-    };
+    if (channel.active && channel.min < start)
+      start = channel.min;
+
+  uint64_t end = start + tool.interval;
 
   // check the time window
-  uint64_t end = time_min + tool.interval;
   for (auto& channel : channels)
     if (channel.active && channel.max < end)
       if (*channel.digitizer_active)
@@ -122,22 +123,25 @@ void Reformatter::ThreadArgs::execute() {
 
   // No more hits to expect. Form the timeslice and send it down the toolchain
 
-  // Reset the channels min times; they will be recalculated in a moment
-  for (auto& channel : channels) channel.min = channel.max;
-
   // Prepare the timeslice hits. Store events hitting the time window in
   // current, the rest in next.
+  {
+    size_t i = 0;
+    for (size_t j = 0; j < current->size(); ++j) {
+      auto& hit = (*current)[j];
+      if (hit.time > end)
+        next->push_back(std::move(hit));
+      else {
+        if (i < j) (*current)[i] = std::move(hit);
+        ++i;
+      };
+    };
+    current->resize(i);
+  };
   for (auto& readout : readouts)
     for (auto& board : *readout)
       for (auto& hit : *board)
-        if (hit.time < end)
-          current->push_back(std::move(hit));
-        else {
-          next->push_back(std::move(hit));
-          channels[hit.channel].min = std::min(
-              channels[hit.channel].min, hit.time
-          );
-        };
+        (hit.time <= end ? current : next)->push_back(std::move(hit));
   readouts.clear();
 
   // Copy the hits and send the timeslice
@@ -145,10 +149,12 @@ void Reformatter::ThreadArgs::execute() {
   current->clear();
   std::swap(current, next);
 
-  time_min = std::numeric_limits<uint64_t>().max();
-  for (auto& channel : channels)
-    if (channel.active)
-      time_min = std::min(time_min, channel.min);
+  // Reset the channels min times
+  for (auto& channel : channels) channel.min = channel.max;
+  for (auto& hit : *current) {
+    auto& channel = channels[hit.channel];
+    if (hit.time < channel.min) channel.min = hit.time;
+  };
 }
 
 Reformatter::ThreadArgs::~ThreadArgs() {
