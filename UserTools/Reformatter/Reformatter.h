@@ -48,6 +48,9 @@ class Reformatter: public ToolFramework::Tool {
     // target timeslice length
     uint64_t interval;
 
+    // last timeslice target timestamp
+    uint64_t time = 0;
+
     bool stop = true;
     std::thread thread;
 

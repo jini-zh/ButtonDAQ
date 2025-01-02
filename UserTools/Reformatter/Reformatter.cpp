@@ -115,7 +115,7 @@ void Reformatter::reformat() {
       if (channel.active && channel.min < start)
         start = channel.min;
 
-    uint64_t end = start + interval;
+    uint64_t end = std::max(start, time) + interval;
 
     // check the time window
     {
@@ -164,6 +164,7 @@ void Reformatter::reformat() {
 
     send_timeslice(*current);
     std::swap(current, next);
+    time = end;
   };
 }
 
