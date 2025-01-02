@@ -8,7 +8,10 @@ void Digitizer::connect() {
   std::stringstream ss;
   std::string string;
   std::string link_string;
-  std::unordered_map<int, ReadoutThread*> thread_partition;
+
+  // link_arg -> indices of digitizers to be read out in the same thread
+  std::unordered_map<uint32_t, std::list<int>> threads_partition;
+
   for (int i = 0; ; ++i) {
     ss.str({});
     ss << "digitizer_" << i << "_link";
@@ -80,12 +83,13 @@ void Digitizer::connect() {
 
     m_data->active_digitizers.push_back(0);
 
-    auto thread = thread_partition.find(arg);
-    if (thread == thread_partition.end()) {
-      threads.emplace_back(*this);
-      thread = thread_partition.emplace(arg, &threads.back()).first;
+    {
+      auto partition = threads_partition.find(arg);
+      if (partition == threads_partition.end())
+        threads_partition.emplace(std::pair<uint32_t, std::list<int>>(arg, { i }));
+      else
+        partition->second.push_back(i);
     };
-    thread->second->digitizers.push_back(&digitizers.back());
 
     if (m_verbose > 2) {
       auto& i = digitizers.back().digitizer.info();
@@ -98,6 +102,13 @@ void Digitizer::connect() {
         << "serial number: " << i.SerialNumber << '\n'
         << "license: " << i.License << std::endl;
     };
+  };
+
+  for (auto& partitions : threads_partition) {
+    std::vector<Board*> boards;
+    boards.reserve(partitions.second.size());
+    for (int i : partitions.second) boards.push_back(&digitizers[i]);
+    threads.emplace_back(ReadoutThread( *this, std::move(boards)));
   };
 }
 
@@ -231,6 +242,8 @@ void Digitizer::configure() {
     if (waveforms) board.waveforms.allocate(digitizer);
 
     info() << "success" << std::endl;
+
+    ++i;
   };
 }
 

@@ -30,7 +30,9 @@ class Digitizer: public ToolFramework::Tool {
       Digitizer& tool;
       std::vector<Board*> digitizers;
 
-      ReadoutThread(Digitizer& tool): tool(tool) {};
+      ReadoutThread(Digitizer& tool, std::vector<Board*>&& digitizers):
+        tool(tool), digitizers(digitizers)
+      {};
     };
 
     struct MonitorThread : ToolFramework::Thread_args {
