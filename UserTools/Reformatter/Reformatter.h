@@ -18,11 +18,8 @@ class Reformatter: public ToolFramework::Tool {
   private:
     struct Channel {
       // timespan of hits that haven't been formed into a timeslice yet
-      uint64_t min;
-      uint64_t max;
-
-      // pointer to the digitizer status (see DataModel::active_digitizers)
-      uint8_t* digitizer_active;
+      uint64_t min = 0;
+      uint64_t max = 0;
 
       // we have or expect to have data in this channel
       // (we have seen events coming from this channel and the channel
@@ -47,6 +44,9 @@ class Reformatter: public ToolFramework::Tool {
 
     // target timeslice length
     uint64_t interval;
+
+    // max time to wait for data from a channel
+    uint64_t dead_time;
 
     // last timeslice target timestamp
     uint64_t time = 0;

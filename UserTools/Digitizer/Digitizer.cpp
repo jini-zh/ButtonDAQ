@@ -73,6 +73,7 @@ void Digitizer::connect() {
     digitizers.emplace_back(
         Board {
           static_cast<uint8_t>(i),
+          false,
           caen::Digitizer(link, arg, conet, vme),
           caen::Digitizer::ReadoutBuffer(),
           caen::Digitizer::DPPEvents<CAEN_DGTZ_DPP_PSD_Event_t>(),
@@ -80,8 +81,6 @@ void Digitizer::connect() {
         }
     );
     info() << "success" << std::endl;
-
-    m_data->active_digitizers.push_back(0);
 
     {
       auto partition = threads_partition.find(arg);
@@ -182,6 +181,8 @@ void Digitizer::configure() {
   int pre_trigger_size = 0;
   m_variables.Get("pre_trigger_size", pre_trigger_size);
 
+  m_data->enabled_digitizer_channels.resize(digitizers.size());
+
   std::string string;
   int i = 0;
   for (auto& board : digitizers) {
@@ -213,6 +214,8 @@ void Digitizer::configure() {
       );
 
     digitizer.setChannelEnableMask(channels);
+    m_data->enabled_digitizer_channels[i] = channels;
+
     if (waveforms)
       for (uint32_t channel = 0; channel < 16; channel += 2)
         if (channels & 3 << channel)
@@ -323,7 +326,7 @@ void Digitizer::readout_thread(Thread_args* arg) {
   Digitizer& tool = args->tool;
   DataModel& data = *tool.m_data;
   for (auto digitizer : args->digitizers)
-    if (data.active_digitizers[digitizer->id])
+    if (digitizer->active)
       try {
         tool.readout(*digitizer);
       } catch (caen::Digitizer::Error& error) {
@@ -333,7 +336,7 @@ void Digitizer::readout_thread(Thread_args* arg) {
           << ": "
           << error.what()
           << std::endl;
-        data.active_digitizers[digitizer->id] = 0;
+        digitizer->active = false;
       };
 }
 
@@ -382,7 +385,7 @@ bool Digitizer::Execute() {
         << static_cast<int>(board.id)
         << std::endl;
       board.digitizer.SWStartAcquisition();
-      m_data->active_digitizers[board.id] = 1;
+      board.active = true;
     };
   };
 
@@ -405,7 +408,7 @@ bool Digitizer::Finalise() {
       << static_cast<int>(board.id)
       << std::endl;
     board.digitizer.SWStopAcquisition();
-    m_data->active_digitizers[board.id] = 0;
+    board.active = false;
   };
   digitizers.clear(); // disconnect from the digitizers
 

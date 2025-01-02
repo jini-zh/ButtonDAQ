@@ -63,13 +63,11 @@ void Reformatter::reformat() {
   /* We wait until the time of the earlist hit available for processing across
    * all channels (`start`) plus the desired timeslice length (`interval`) is
    * less than the time of the latest hit in the channel for all active
-   * channels. A channel is active if we have seen data from it and its
-   * digitizer is active (see DataModel::active_digitizers and the Digitizer
-   * tool; basically a digitizer is active if it is responding). When we have
-   * all the hits we need, they are extracted from `readouts` and separated
-   * into `current` and `next` with `current` storing the hits fitting the time
-   * window, and `next` storing the hits to be send next. `current` data is
-   * then sent for processing.
+   * channels. A channel is active if we have seen data from it not too long
+   * ago. When we have all the hits we need, they are extracted from `readouts`
+   * and separated into `current` and `next` with `current` storing the hits
+   * fitting the time window, and `next` storing the hits to be send next.
+   * `current` data is then sent for processing.
    */
 
   while (!stop || !current->empty()) {
@@ -86,12 +84,9 @@ void Reformatter::reformat() {
           hit.baseline = decode_baseline(hit.baseline);
 
           if (hit.channel >= channels.size()) {
-            // A new channel is seen. Initialize the `digitizer_active` fields
-            auto i = channels.size();
-            channels.resize(hit.channel + 1);
-            for (; i < channels.size(); ++i)
-              channels[i].digitizer_active
-                = &m_data->active_digitizers[Hit::get_digitizer_id(i)];
+            std::stringstream ss;
+            ss << "Unexpected hit channel " << static_cast<int>(hit.channel);
+            throw std::runtime_error(ss.str());
           };
 
           Channel& channel = channels[hit.channel];
@@ -122,12 +117,11 @@ void Reformatter::reformat() {
       bool complete = true;
       for (auto& channel : channels)
         if (channel.active && channel.max < end)
-          if (*channel.digitizer_active) {
+          if (channel.max + dead_time > start) {
             // some channel may yet provide data fitting the current time window
             complete = false;
             break;
           } else
-            // channel's digitizer went inactive
             channel.active = false;
       if (!complete && !stop) continue;
     }
@@ -178,8 +172,19 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
   m_variables.Get("interval", time);
   interval = time_from_seconds(time);
 
+  dead_time = 10 * interval;
+  if (m_variables.Get("dead_time", time)) dead_time = time_from_seconds(time);
+
   if (!current) current.reset(new std::vector<Hit>);
   if (!next) next.reset(new std::vector<Hit>);
+
+  channels.resize(m_data->enabled_digitizer_channels.size() * 16);
+  {
+    int i = 0;
+    for (uint16_t mask : m_data->enabled_digitizer_channels)
+      for (int j = 0; j < 16; ++j)
+        channels[i++].active = mask & 1 << j;
+  };
 
   stop = false;
   thread = std::thread(&Reformatter::reformat, this);

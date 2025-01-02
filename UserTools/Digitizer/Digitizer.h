@@ -20,6 +20,7 @@ class Digitizer: public ToolFramework::Tool {
   private:
     struct Board {
       uint8_t                                                      id;
+      bool                                                         active;
       caen::Digitizer                                              digitizer;
       caen::Digitizer::ReadoutBuffer                               buffer;
       caen::Digitizer::DPPEvents<CAEN_DGTZ_DPP_PSD_Event_t>        events;
