@@ -5,21 +5,6 @@
 
 Reformatter::Reformatter(): Tool() {}
 
-// CAENDigitizer 2.17.3 coupled with DPP-PSD firmware version 136.137 (AMC)
-// 04.25 (ROC) has a bug when the baseline (times 4) is returned as an int16_t
-// rather than uint16_t, with the sign depending on the channel pulse polarity.
-// This function decodes the proper baseline value.
-inline static uint16_t decode_baseline(uint16_t baseline) {
-  // XXX: currently assuming negative pulse polarity
-#if 0
-  // positive pulse polarity
-  return (uint16_t)-baseline / 4;
-#else
-  // negative pulse polarity
-  return baseline / 4;
-#endif
-}
-
 void Reformatter::send_timeslice(Time time, std::vector<Hit>& hits) {
   if (hits.empty()) return;
 
@@ -67,8 +52,6 @@ void Reformatter::reformat() {
 
       for (auto& board : *readouts.back())
         for (auto& hit : *board) {
-          hit.baseline = decode_baseline(hit.baseline);
-
           if (hit.channel >= channels.size()) {
             std::stringstream ss;
             ss << "Unexpected hit channel " << static_cast<int>(hit.channel);
