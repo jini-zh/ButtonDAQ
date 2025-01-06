@@ -13,7 +13,7 @@
 enum class trigger_type {nhits, calib, zero_bais};  
 
 struct TimeSlice {
-  uint64_t time;
+  Time time;
   std::vector<Hit> hits;
   std::mutex mutex;
   std::vector<std::pair<trigger_type, unsigned long>> positive_trggers;

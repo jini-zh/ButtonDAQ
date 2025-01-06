@@ -5,33 +5,6 @@
 
 Reformatter::Reformatter(): Tool() {}
 
-// See Table 2.3 in UM2580_DPSD_UserManual_rev9
-static uint64_t time_from_seconds(long double seconds) {
-  seconds /= 2e-9; // Tsampl
-  uint64_t time = seconds; // Tcoarse
-  seconds *= 1024;
-  return time << 10
-       | static_cast<uint64_t>(seconds) & 0x3ff; // Tfine
-}
-
-static long double time_to_seconds(uint64_t time) {
-  return (
-        static_cast<long double>(time >> 10)
-      + static_cast<long double>(time & 0x3ff) / 1024.0L
-  ) * 2e-9L;
-}
-
-inline static uint64_t decode_time(uint64_t time) {
-  uint32_t tag    = time >> 32;
-  uint32_t extras = time   & 0xffffffff;
-  uint64_t result = extras & 0xffff0000; // bits 16 to 31
-  result <<= 31 - 16;
-  result |= tag;
-  result <<= 10;
-  result |= extras & 0x3ff; // bits 0 to 9
-  return result;
-}
-
 // CAENDigitizer 2.17.3 coupled with DPP-PSD firmware version 136.137 (AMC)
 // 04.25 (ROC) has a bug when the baseline (times 4) is returned as an int16_t
 // rather than uint16_t, with the sign depending on the channel pulse polarity.
@@ -47,7 +20,7 @@ inline static uint16_t decode_baseline(uint16_t baseline) {
 #endif
 }
 
-void Reformatter::send_timeslice(uint64_t time, std::vector<Hit>& hits) {
+void Reformatter::send_timeslice(Time time, std::vector<Hit>& hits) {
   if (hits.empty()) return;
 
   std::unique_ptr<TimeSlice> timeslice(new TimeSlice);
@@ -82,8 +55,8 @@ void Reformatter::reformat() {
    * `current` data is then sent for processing.
    */
 
-  uint64_t start = 0;
-  uint64_t time  = 0;
+  Time start;
+  Time time;
 
   while (!stop) {
     if (m_data->raw_readout) {
@@ -94,8 +67,6 @@ void Reformatter::reformat() {
 
       for (auto& board : *readouts.back())
         for (auto& hit : *board) {
-          // Decode CAEN data format
-          hit.time     = decode_time(hit.time);
           hit.baseline = decode_baseline(hit.baseline);
 
           if (hit.channel >= channels.size()) {
@@ -113,7 +84,7 @@ void Reformatter::reformat() {
           };
         };
     } else {
-      usleep(time_to_seconds(interval) * 0.5e6);
+      usleep(interval.seconds() * 0.5e6);
       continue;
     };
 
@@ -122,7 +93,7 @@ void Reformatter::reformat() {
         time = channel.time;
 
     while (true) {
-      uint64_t end = start + interval;
+      Time end = start + interval;
       if (time < end) break;
 
       bool done = false;
@@ -185,27 +156,24 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
       << ", using 0.1 s" << std::endl;
     time = 0.1;
   };
-  interval = time_from_seconds(time);
+  interval = Time(time);
 
   dead_time = 10 * interval;
   if (m_variables.Get("dead_time", time)) {
     if (time <= 0) {
       *m_data->Log << ML(0) << "Reformatter: invalid dead time: " << time;
-      time = 10 * time_to_seconds(interval);
+      time = 10 * interval.seconds();
       *m_data->Log << ", using " << time << " s" << std::endl;
     };
-    dead_time = time_from_seconds(time) + interval;
+    dead_time = Time(time) + interval;
   };
 
   channels.resize(m_data->enabled_digitizer_channels.size() * 16);
   {
     int i = 0;
     for (uint16_t mask : m_data->enabled_digitizer_channels)
-      for (int j = 0; j < 16; ++j) {
-        auto& channel = channels[i++];
-        channel.time   = 0;
-        channel.active = mask & 1 << j;
-      };
+      for (int j = 0; j < 16; ++j)
+        channels[i++].active = mask & 1 << j;
   };
 
   stop = false;

@@ -291,8 +291,7 @@ void Digitizer::readout(Board& board) {
          event != board.events.end(channel);
          ++event)
     {
-      hit->time         = static_cast<uint64_t>(event->TimeTag) << 32
-                        | event->Extras;
+      hit->time         = Time(event->TimeTag, event->Extras);
       hit->charge_short = event->ChargeShort;
       hit->charge_long  = event->ChargeLong;
 #if 0

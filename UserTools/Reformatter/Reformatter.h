@@ -17,7 +17,7 @@ class Reformatter: public ToolFramework::Tool {
 
   private:
     struct Channel {
-      uint64_t time;  // time of the last hit in the channel
+      Time time; // time of the last hit in the channel
       bool active; // whether we expect hits in the channel
     };
 
@@ -36,15 +36,15 @@ class Reformatter: public ToolFramework::Tool {
     > readouts;
 
     // target timeslice length
-    uint64_t interval;
+    Time interval;
 
     // max time to wait for data from a channel
-    uint64_t dead_time;
+    Time dead_time;
 
     bool stop = true;
     std::thread thread;
 
-    void send_timeslice(std::vector<Hit>& hits);
+    void send_timeslice(Time time, std::vector<Hit>& hits);
     void reformat();
 };
 
