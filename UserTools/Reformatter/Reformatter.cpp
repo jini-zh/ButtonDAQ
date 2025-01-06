@@ -51,12 +51,23 @@ void Reformatter::send_timeslice(std::vector<Hit>& hits) {
   if (hits.empty()) return;
 
   std::unique_ptr<TimeSlice> timeslice(new TimeSlice);
-  timeslice->hits.reserve(hits.size());
-  for (auto& hit : hits) timeslice->hits.push_back(std::move(hit));
+  timeslice->hits.insert(
+      timeslice->hits.begin(),
+      std::make_move_iterator(hits.begin()),
+      std::make_move_iterator(hits.end())
+  );
   hits.clear();
 
   std::lock_guard<std::mutex> lock(m_data->readout_mutex);
   m_data->readout.push(std::move(timeslice));
+};
+
+template <typename Container>
+static void remove_if(
+    Container& c,
+    const std::function<bool (typename Container::value_type&)>& predicate
+) {
+  c.erase(std::remove_if(c.begin(), c.end(), predicate), c.end());
 };
 
 void Reformatter::reformat() {
@@ -70,7 +81,10 @@ void Reformatter::reformat() {
    * `current` data is then sent for processing.
    */
 
-  while (!stop || !current->empty()) {
+  uint64_t start = 0;
+  uint64_t time  = 0;
+
+  while (!stop) {
     if (m_data->raw_readout) {
       {
         std::lock_guard<std::mutex> lock(m_data->raw_readout_mutex);
@@ -91,76 +105,70 @@ void Reformatter::reformat() {
 
           Channel& channel = channels[hit.channel];
           if (channel.active) {
-            if (hit.time < channel.min)
-              channel.min = hit.time;
-            else if (hit.time > channel.max)
-              channel.max = hit.time;
+            if (hit.time > channel.time) channel.time = hit.time;
           } else {
             channel.active = true;
-            channel.min = channel.max = hit.time;
+            channel.time = hit.time;
           };
         };
-    } else if (current->empty()) {
+    } else {
       usleep(time_to_seconds(interval) * 0.5e6);
       continue;
     };
 
-    auto start = std::numeric_limits<uint64_t>().max();
     for (auto& channel : channels)
-      if (channel.active && channel.min < start)
-        start = channel.min;
+      if (channel.time > time)
+        time = channel.time;
 
-    uint64_t end = std::max(start, time) + interval;
+    while (true) {
+      uint64_t end = start + interval;
+      if (time < end) break;
 
-    // check the time window
-    {
-      bool complete = true;
+      bool done = false;
       for (auto& channel : channels)
-        if (channel.active && channel.max < end)
-          if (channel.max + dead_time > start) {
-            // some channel may yet provide data fitting the current time window
-            complete = false;
+        if (channel.active && channel.time < end)
+          if (channel.time + dead_time > time) {
+            // some channel may yet provide data fitting the current time
+            // window
+            done = true;
             break;
-          } else
+          } else {
             channel.active = false;
-      if (!complete && !stop) continue;
-    }
+            done = done && channel.time >= start;
+          };
+      if (done) break;
 
-    // No more hits to expect. Form the timeslice and send it down the toolchain
+      remove_if(
+          readouts,
+          [this, end](
+            std::unique_ptr<
+              std::list<std::unique_ptr<std::vector<Hit>>>
+            >& readout
+          ) -> bool {
+            remove_if(
+                *readout,
+                [this, end](std::unique_ptr<std::vector<Hit>>& board) -> bool {
+                  remove_if(
+                      *board,
+                      [this, end](Hit& hit) -> bool {
+                        if (hit.time >= end) return false;
+                        buffer.push_back(std::move(hit));
+                        return true;
+                      }
+                  );
+                  return board->empty();
+                }
+            );
+            return readout->empty();
+          }
+      );
 
-    // Prepare the timeslice hits. Store events hitting the time window in
-    // current, the rest in next.
-    {
-      size_t i = 0;
-      for (size_t j = 0; j < current->size(); ++j) {
-        auto& hit = (*current)[j];
-        if (hit.time > end)
-          next->push_back(std::move(hit));
-        else {
-          if (i < j) (*current)[i] = std::move(hit);
-          ++i;
-        };
-      };
-      current->resize(i);
+      send_timeslice(buffer);
+
+      start = end;
     };
-    for (auto& readout : readouts)
-      for (auto& board : *readout)
-        for (auto& hit : *board)
-          (hit.time <= end ? current : next)->push_back(std::move(hit));
-    readouts.clear();
-
-    // Reset the channels min times
-    for (auto& channel : channels) channel.min = channel.max;
-    for (auto& hit : *next) {
-      auto& channel = channels[hit.channel];
-      if (hit.time < channel.min) channel.min = hit.time;
-    };
-
-    send_timeslice(*current);
-    std::swap(current, next);
-    time = end;
   };
-}
+};
 
 bool Reformatter::Initialise(std::string configfile, DataModel& data) {
   InitialiseTool(data);
@@ -188,15 +196,15 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
     dead_time = time_from_seconds(time) + interval;
   };
 
-  if (!current) current.reset(new std::vector<Hit>);
-  if (!next) next.reset(new std::vector<Hit>);
-
   channels.resize(m_data->enabled_digitizer_channels.size() * 16);
   {
     int i = 0;
     for (uint16_t mask : m_data->enabled_digitizer_channels)
-      for (int j = 0; j < 16; ++j)
-        channels[i++].active = mask & 1 << j;
+      for (int j = 0; j < 16; ++j) {
+        auto& channel = channels[i++];
+        channel.time   = 0;
+        channel.active = mask & 1 << j;
+      };
   };
 
   stop = false;
