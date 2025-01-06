@@ -170,10 +170,23 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
 
   long double time = 0.1;
   m_variables.Get("interval", time);
+  if (time <= 0) {
+    *m_data->Log
+      << ML(0) << "Reformatter: invalid time interval: " << time
+      << ", using 0.1 s" << std::endl;
+    time = 0.1;
+  };
   interval = time_from_seconds(time);
 
   dead_time = 10 * interval;
-  if (m_variables.Get("dead_time", time)) dead_time = time_from_seconds(time);
+  if (m_variables.Get("dead_time", time)) {
+    if (time <= 0) {
+      *m_data->Log << ML(0) << "Reformatter: invalid dead time: " << time;
+      time = 10 * time_to_seconds(interval);
+      *m_data->Log << ", using " << time << " s" << std::endl;
+    };
+    dead_time = time_from_seconds(time) + interval;
+  };
 
   if (!current) current.reset(new std::vector<Hit>);
   if (!next) next.reset(new std::vector<Hit>);
