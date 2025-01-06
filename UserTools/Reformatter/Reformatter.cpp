@@ -47,10 +47,11 @@ inline static uint16_t decode_baseline(uint16_t baseline) {
 #endif
 }
 
-void Reformatter::send_timeslice(std::vector<Hit>& hits) {
+void Reformatter::send_timeslice(uint64_t time, std::vector<Hit>& hits) {
   if (hits.empty()) return;
 
   std::unique_ptr<TimeSlice> timeslice(new TimeSlice);
+  timeslice->time = time;
   timeslice->hits.insert(
       timeslice->hits.begin(),
       std::make_move_iterator(hits.begin()),
@@ -163,7 +164,7 @@ void Reformatter::reformat() {
           }
       );
 
-      send_timeslice(buffer);
+      send_timeslice(start, buffer);
 
       start = end;
     };
