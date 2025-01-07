@@ -13,6 +13,8 @@
 
 class Digitizer: public ToolFramework::Tool {
   public:
+    ~Digitizer() { Finalise(); }
+
     bool Initialise(std::string configfile, DataModel&);
     bool Execute();
     bool Finalise();
@@ -27,40 +29,31 @@ class Digitizer: public ToolFramework::Tool {
       caen::Digitizer::DPPWaveforms<CAEN_DGTZ_DPP_PSD_Waveforms_t> waveforms;
     };
 
-    struct ReadoutThread : ToolFramework::Thread_args {
-      Digitizer& tool;
-      std::vector<Board*> digitizers;
-
-      ReadoutThread(Digitizer& tool, std::vector<Board*>&& digitizers):
-        tool(tool), digitizers(digitizers)
-      {};
+    struct ReadoutThread {
+      std::vector<Board*> boards;
+      std::thread thread;
     };
-
-    struct MonitorThread : ToolFramework::Thread_args {
-      Digitizer& tool;
-      std::chrono::seconds interval;
-
-      MonitorThread(Digitizer& tool): tool(tool) {};
-    };
-
-    ToolFramework::Utilities util;
-    std::vector<ReadoutThread> threads;
 
     std::vector<Board> digitizers;
     uint16_t nsamples; // number of samples in waveforms
 
     bool acquiring = false;
+    std::vector<ReadoutThread> readout_threads;
 
-    MonitorThread* monitor = nullptr;
+    std::timed_mutex monitoring_stop;
+    std::thread monitoring;
 
     void connect();
+    void disconnect();
     void configure();
-    void run_readout();
-    void run_monitor();
-    void readout(Board&);
 
-    static void readout_thread(ToolFramework::Thread_args*);
-    static void monitor_thread(ToolFramework::Thread_args*);
+    void start_acquisition();
+    void stop_acquisition();
+
+    void readout(Board&);
+    void readout(const std::vector<Board*>&);
+
+    void monitor(std::chrono::seconds interval);
 
     ToolFramework::Logging& log(int level) {
       return *m_log << ToolFramework::MsgL(level, m_verbose);

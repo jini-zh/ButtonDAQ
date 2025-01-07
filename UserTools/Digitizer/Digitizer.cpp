@@ -103,13 +103,21 @@ void Digitizer::connect() {
     };
   };
 
+  readout_threads.reserve(threads_partition.size());
   for (auto& partitions : threads_partition) {
     std::vector<Board*> boards;
     boards.reserve(partitions.second.size());
     for (int i : partitions.second) boards.push_back(&digitizers[i]);
-    threads.emplace_back(ReadoutThread( *this, std::move(boards)));
+    ReadoutThread thread;
+    thread.boards = std::move(boards);
+    readout_threads.push_back(std::move(thread));
   };
 }
+
+void Digitizer::disconnect() {
+  readout_threads.clear();
+  digitizers.clear();
+};
 
 void Digitizer::configure() {
   CAEN_DGTZ_DPP_PSD_Params_t params;
@@ -250,23 +258,41 @@ void Digitizer::configure() {
   };
 }
 
-void Digitizer::run_readout() {
-  std::stringstream ss;
-  for (size_t i = 0; i < threads.size(); ++i) {
-    ss.str({});
-    ss << "Digitizer " << i;
-    util.CreateThread(ss.str(), &readout_thread, &threads[i]);
+void Digitizer::start_acquisition() {
+  acquiring = true;
+  for (auto& rt : readout_threads) {
+    for (auto board : rt.boards) {
+      info()
+        << "starting acquisition on digitizer "
+        << static_cast<int>(board->id)
+        << std::endl;
+      board->digitizer.SWStartAcquisition();
+      board->active = true;
+    };
+    rt.thread = std::thread(
+        static_cast<void (Digitizer::*)(const std::vector<Board*>&)>(
+          &Digitizer::readout
+        ),
+        this,
+        rt.boards
+    );
   };
-}
+};
 
-void Digitizer::run_monitor() {
-  if (!m_data->services) return;
-  int interval = 5;
-  m_variables.Get("digitizer_interval", interval);
-  monitor = new MonitorThread(*this);
-  monitor->interval = std::chrono::seconds(interval);
-  util.CreateThread("Digitizer monitor", &monitor_thread, monitor);
-}
+void Digitizer::stop_acquisition() {
+  acquiring = false;
+  for (auto& rt : readout_threads) {
+    rt.thread.join();
+    for (auto board : rt.boards) {
+      info()
+        << "stopping acquisition on digitizer "
+        << static_cast<int>(board->id)
+        << std::endl;
+      board->digitizer.SWStopAcquisition();
+      board->active = false;
+    };
+  };
+};
 
 // Read data from the board and put it into m_data.raw_readout
 void Digitizer::readout(Board& board) {
@@ -320,44 +346,48 @@ void Digitizer::readout(Board& board) {
   m_data->raw_readout->push_back(std::move(hits));
 }
 
-void Digitizer::readout_thread(Thread_args* arg) {
-  ReadoutThread* args = static_cast<ReadoutThread*>(arg);
-  Digitizer& tool = args->tool;
-  DataModel& data = *tool.m_data;
-  for (auto digitizer : args->digitizers)
-    if (digitizer->active)
-      try {
-        tool.readout(*digitizer);
-      } catch (caen::Digitizer::Error& error) {
-        tool.error()
-          << "digitizer "
-          << static_cast<int>(digitizer->id)
-          << ": "
-          << error.what()
-          << std::endl;
-        digitizer->active = false;
-      };
-}
+void Digitizer::readout(const std::vector<Board*>& boards) {
+  int active = 0;
+  for (auto board : boards) if (board->active) ++active;
 
-void Digitizer::monitor_thread(Thread_args* arg) {
-  auto monitor = static_cast<MonitorThread*>(arg);
+  while (acquiring && active > 0)
+    for (auto board : boards)
+      if (board->active)
+        try {
+          readout(*board);
+        } catch (caen::Digitizer::Error& error) {
+          this->error()
+            << "digitizer "
+            << static_cast<int>(board->id)
+            << ": "
+            << error.what()
+            << std::endl;
+          board->active = false;
+          --active;
+        };
+};
 
-  Store data;
-  int b = 0;
-  for (auto& board : monitor->tool.digitizers) {
-    auto bprefix = "digitizer_" + std::to_string(b++);
-    for (unsigned c = 0; c < 16; ++c)
-      data.Set(
-          bprefix + "_channel_" + std::to_string(c) + "_temperature",
-          board.digitizer.readTemperature(c)
-      );
-  };
+void Digitizer::monitor(std::chrono::seconds interval) {
+  do {
+    Store data;
+    int b = 0;
+    for (auto& board : digitizers) {
+      auto prefix = "digitizer_" + std::to_string(b++);
+      for (unsigned c = 0; c < 16; ++c)
+        data.Set(
+            prefix + "_channel_" + std::to_string(c) + "_temperature",
+            board.digitizer.readTemperature(c)
+        );
+    };
 
-  std::string json;
-  data >> json;
-  monitor->tool.m_data->services->SendMonitoringData(std::move(json), "Digitizer");
+    std::string json;
+    data >> json;
+    m_data->services->SendMonitoringData(std::move(json), "Digitizer");
 
-  std::this_thread::sleep_for(monitor->interval);
+    // Locking a mutex seems to be the simplest way to implement an
+    // interruptible sleep in C++11
+  } while (!monitoring_stop.try_lock_for(interval));
+  monitoring_stop.unlock();
 };
 
 bool Digitizer::Initialise(std::string configfile, DataModel &data) {
@@ -368,48 +398,35 @@ bool Digitizer::Initialise(std::string configfile, DataModel &data) {
 
   connect();
   configure();
-  run_readout();
-  run_monitor();
+
+  if (m_data->services) {
+    int interval = 5;
+    m_variables.Get("monitor_interval", interval);
+    monitoring_stop.lock();
+    monitoring = std::thread(
+        &Digitizer::monitor, this, std::chrono::seconds(interval)
+    );
+  };
 
   ExportConfiguration();
   return true;
 };
 
 bool Digitizer::Execute() {
-  if (!acquiring) {
-    acquiring = true;
-    for (auto& board : digitizers) {
-      info()
-        << "starting acquisition on digitizer "
-        << static_cast<int>(board.id)
-        << std::endl;
-      board.digitizer.SWStartAcquisition();
-      board.active = true;
-    };
-  };
-
+  if (!acquiring) start_acquisition();
   return true;
-}
+};
 
 bool Digitizer::Finalise() {
-  if (monitor) {
-    util.KillThread(monitor);
-    delete monitor;
-    monitor = nullptr;
+  if (monitoring_stop.try_lock())
+    monitoring_stop.unlock();
+  else {
+    monitoring_stop.unlock();
+    monitoring.join();
   };
 
-  for (auto& thread : threads) util.KillThread(&thread);
-  threads.clear();
-
-  for (auto& board : digitizers) {
-    info()
-      << "stopping acquisition on digitizer "
-      << static_cast<int>(board.id)
-      << std::endl;
-    board.digitizer.SWStopAcquisition();
-    board.active = false;
-  };
-  digitizers.clear(); // disconnect from the digitizers
+  if (acquiring) stop_acquisition();
+  disconnect();
 
   return true;
 }
