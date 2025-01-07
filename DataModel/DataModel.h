@@ -40,6 +40,10 @@ class DataModel : public DAQDataModelBase {
   
   DataModel(); ///< Simple constructor 
 
+  bool run_start     = false;
+  bool run_stop      = false;
+  bool change_config = false;
+
   //TTree* GetTTree(std::string name);
   //void AddTTree(std::string name,TTree *tree);
   //void DeleteTTree(std::string name,TTree *tree);

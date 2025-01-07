@@ -172,13 +172,27 @@ bool Reformatter::Initialise(std::string configfile, DataModel& data) {
   if (!m_variables.Get("verbose", m_verbose)) m_verbose = 1;
 
   configure();
-  start_reformatting();
 
   ExportConfiguration();
   return true;
 }
 
 bool Reformatter::Execute() {
+  if (m_data->run_stop && reformatting) stop_reformatting();
+
+  if (m_data->change_config) {
+    bool ref = reformatting;
+    if (ref) stop_reformatting();
+
+    InitialiseConfiguration();
+
+    configure();
+
+    if (ref) start_reformatting();
+  };
+
+  if (m_data->run_start && !reformatting) start_reformatting();
+
   return true;
 }
 

@@ -442,7 +442,26 @@ bool Digitizer::Initialise(std::string configfile, DataModel &data) {
 };
 
 bool Digitizer::Execute() {
-  if (!acquiring) start_acquisition();
+  if (digitizers.empty()) return true;
+
+  if (m_data->run_stop && acquiring) stop_acquisition();
+
+  if (m_data->change_config) {
+    bool acq = acquiring;
+    if (acq) stop_acquisition();
+
+    InitialiseConfiguration();
+
+    disconnect();
+
+    connect();
+    configure();
+
+    if (acq) start_acquisition();
+  };
+
+  if (m_data->run_start && !acquiring) start_acquisition();
+
   return true;
 };
 
