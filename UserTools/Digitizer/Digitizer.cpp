@@ -4,6 +4,59 @@
 
 #include "Digitizer.h"
 
+Digitizer::Monitor::Monitor(
+    ToolFramework::Services& services,
+    const std::vector<Board>& boards,
+    std::chrono::seconds     interval
+): services(services), boards(boards), interval(interval)
+{
+  start();
+};
+
+Digitizer::Monitor::~Monitor() {
+  stop();
+};
+
+void Digitizer::Monitor::monitor() {
+  do {
+    Store data;
+    int b = 0;
+    for (auto& board : boards) {
+      auto prefix = "digitizer_" + std::to_string(b++);
+      for (unsigned c = 0; c < 16; ++c)
+        data.Set(
+            prefix + "_channel_" + std::to_string(c) + "_temperature",
+            board.digitizer.readTemperature(c)
+        );
+    };
+
+    std::string json;
+    data >> json;
+    services.SendMonitoringData(std::move(json), "Digitizer");
+
+    // Locking a mutex seems to be the simplest way to implement an
+    // interruptible sleep in C++11
+  } while (!mutex.try_lock_for(interval));
+  mutex.unlock();
+};
+
+void Digitizer::Monitor::start() {
+  mutex.lock();
+  thread = std::thread(&Digitizer::Monitor::monitor, this);
+};
+
+void Digitizer::Monitor::stop() {
+  mutex.unlock();
+  thread.join();
+};
+
+void Digitizer::Monitor::set_interval(std::chrono::seconds interval) {
+  if (interval != this->interval) return;
+  stop();
+  this->interval = interval;
+  start();
+};
+
 void Digitizer::connect() {
   std::stringstream ss;
   std::string string;
@@ -256,6 +309,14 @@ void Digitizer::configure() {
 
     ++i;
   };
+
+  i = 60;
+  m_variables.Get("monitor_interval", i);
+  auto interval = std::chrono::seconds(i);
+  if (monitor)
+    monitor->set_interval(interval);
+  else if (m_data->services)
+    monitor.reset(new Monitor(*m_data->services, digitizers, interval));
 }
 
 void Digitizer::start_acquisition() {
@@ -367,29 +428,6 @@ void Digitizer::readout(const std::vector<Board*>& boards) {
         };
 };
 
-void Digitizer::monitor(std::chrono::seconds interval) {
-  do {
-    Store data;
-    int b = 0;
-    for (auto& board : digitizers) {
-      auto prefix = "digitizer_" + std::to_string(b++);
-      for (unsigned c = 0; c < 16; ++c)
-        data.Set(
-            prefix + "_channel_" + std::to_string(c) + "_temperature",
-            board.digitizer.readTemperature(c)
-        );
-    };
-
-    std::string json;
-    data >> json;
-    m_data->services->SendMonitoringData(std::move(json), "Digitizer");
-
-    // Locking a mutex seems to be the simplest way to implement an
-    // interruptible sleep in C++11
-  } while (!monitoring_stop.try_lock_for(interval));
-  monitoring_stop.unlock();
-};
-
 bool Digitizer::Initialise(std::string configfile, DataModel &data) {
   InitialiseTool(data);
   InitialiseConfiguration(configfile);
@@ -398,15 +436,6 @@ bool Digitizer::Initialise(std::string configfile, DataModel &data) {
 
   connect();
   configure();
-
-  if (m_data->services) {
-    int interval = 5;
-    m_variables.Get("monitor_interval", interval);
-    monitoring_stop.lock();
-    monitoring = std::thread(
-        &Digitizer::monitor, this, std::chrono::seconds(interval)
-    );
-  };
 
   ExportConfiguration();
   return true;
@@ -418,11 +447,9 @@ bool Digitizer::Execute() {
 };
 
 bool Digitizer::Finalise() {
-  if (monitoring_stop.try_lock())
-    monitoring_stop.unlock();
-  else {
-    monitoring_stop.unlock();
-    monitoring.join();
+  if (monitor) {
+    delete monitor.release();
+    monitor = nullptr;
   };
 
   if (acquiring) stop_acquisition();

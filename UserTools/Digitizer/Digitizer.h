@@ -34,14 +34,37 @@ class Digitizer: public ToolFramework::Tool {
       std::thread thread;
     };
 
+    class Monitor {
+      public:
+        Monitor(
+            ToolFramework::Services&  services,
+            const std::vector<Board>& boards,
+            std::chrono::seconds      interval
+        );
+        ~Monitor();
+
+        void set_interval(std::chrono::seconds);
+
+      private:
+        ToolFramework::Services&  services;
+        const std::vector<Board>& boards;
+        std::chrono::seconds      interval;
+        std::thread               thread;
+        std::timed_mutex          mutex;
+
+        void start();
+        void stop();
+
+        void monitor();
+    };
+
     std::vector<Board> digitizers;
     uint16_t nsamples; // number of samples in waveforms
 
     bool acquiring = false;
     std::vector<ReadoutThread> readout_threads;
 
-    std::timed_mutex monitoring_stop;
-    std::thread monitoring;
+    std::unique_ptr<Monitor> monitor;
 
     void connect();
     void disconnect();
@@ -52,8 +75,6 @@ class Digitizer: public ToolFramework::Tool {
 
     void readout(Board&);
     void readout(const std::vector<Board*>&);
-
-    void monitor(std::chrono::seconds interval);
 
     ToolFramework::Logging& log(int level) {
       return *m_log << ToolFramework::MsgL(level, m_verbose);
