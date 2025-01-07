@@ -41,8 +41,13 @@ class Reformatter: public ToolFramework::Tool {
     // max time to wait for data from a channel
     Time dead_time;
 
-    bool stop = true;
+    bool reformatting = false;
     std::thread thread;
+
+    void configure();
+
+    void start_reformatting();
+    void stop_reformatting();
 
     void send_timeslice(Time time, std::vector<Hit>& hits);
     void reformat();

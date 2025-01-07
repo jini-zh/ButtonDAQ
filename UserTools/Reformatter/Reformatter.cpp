@@ -29,6 +29,36 @@ static void remove_if(
   c.erase(std::remove_if(c.begin(), c.end(), predicate), c.end());
 };
 
+void Reformatter::configure() {
+  long double time = 0.1;
+  m_variables.Get("interval", time);
+  if (time <= 0) {
+    *m_data->Log
+      << ML(0) << "Reformatter: invalid time interval: " << time
+      << ", using 0.1 s" << std::endl;
+    time = 0.1;
+  };
+  interval = Time(time);
+
+  dead_time = 10 * interval;
+  if (m_variables.Get("dead_time", time)) {
+    if (time <= 0) {
+      *m_data->Log << ML(0) << "Reformatter: invalid dead time: " << time;
+      time = 10 * interval.seconds();
+      *m_data->Log << ", using " << time << " s" << std::endl;
+    };
+    dead_time = Time(time) + interval;
+  };
+
+  channels.resize(m_data->enabled_digitizer_channels.size() * 16);
+  {
+    int i = 0;
+    for (uint16_t mask : m_data->enabled_digitizer_channels)
+      for (int j = 0; j < 16; ++j)
+        channels[i++].active = mask & 1 << j;
+  };
+};
+
 void Reformatter::reformat() {
   /* We wait until the time of the earlist hit available for processing across
    * all channels (`start`) plus the desired timeslice length (`interval`) is
@@ -43,7 +73,7 @@ void Reformatter::reformat() {
   Time start;
   Time time;
 
-  while (!stop) {
+  while (reformatting) {
     if (m_data->raw_readout) {
       {
         std::lock_guard<std::mutex> lock(m_data->raw_readout_mutex);
@@ -125,42 +155,24 @@ void Reformatter::reformat() {
   };
 };
 
+void Reformatter::start_reformatting() {
+  reformatting = true;
+  thread = std::thread(&Reformatter::reformat, this);
+};
+
+void Reformatter::stop_reformatting() {
+  reformatting = false;
+  thread.join();
+};
+
 bool Reformatter::Initialise(std::string configfile, DataModel& data) {
   InitialiseTool(data);
   InitialiseConfiguration(configfile);
 
   if (!m_variables.Get("verbose", m_verbose)) m_verbose = 1;
 
-  long double time = 0.1;
-  m_variables.Get("interval", time);
-  if (time <= 0) {
-    *m_data->Log
-      << ML(0) << "Reformatter: invalid time interval: " << time
-      << ", using 0.1 s" << std::endl;
-    time = 0.1;
-  };
-  interval = Time(time);
-
-  dead_time = 10 * interval;
-  if (m_variables.Get("dead_time", time)) {
-    if (time <= 0) {
-      *m_data->Log << ML(0) << "Reformatter: invalid dead time: " << time;
-      time = 10 * interval.seconds();
-      *m_data->Log << ", using " << time << " s" << std::endl;
-    };
-    dead_time = Time(time) + interval;
-  };
-
-  channels.resize(m_data->enabled_digitizer_channels.size() * 16);
-  {
-    int i = 0;
-    for (uint16_t mask : m_data->enabled_digitizer_channels)
-      for (int j = 0; j < 16; ++j)
-        channels[i++].active = mask & 1 << j;
-  };
-
-  stop = false;
-  thread = std::thread(&Reformatter::reformat, this);
+  configure();
+  start_reformatting();
 
   ExportConfiguration();
   return true;
@@ -171,9 +183,6 @@ bool Reformatter::Execute() {
 }
 
 bool Reformatter::Finalise() {
-  if (!stop) {
-    stop = true;
-    thread.join();
-  };
+  if (reformatting) stop_reformatting();
   return true;
 }
